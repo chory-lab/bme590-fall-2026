@@ -1,15 +1,472 @@
 ---
 title: "Define custom labware: a PCR plate"
+subtitle: "A complete build, from measurements to a definition you can import"
 ---
 
-::: {.callout-note appearance="simple"}
-Not yet written. See `PLAN.md` §3 for this chapter's scope.
+This chapter builds one piece of labware from nothing: a 96-well skirted PCR plate with conical
+wells. Every step is given, in order, and the definition at the end works — it goes on a deck, it
+indexes, it converts volume to height, and you can pipette into it.
+
+**0.2.2 ships no PCR plate.** `nest_96_wellplate_100ul_pcr_full_skirt` existed in older PLR and has
+no replacement, so this is a definition worth having rather than an exercise.
+
+## Setup {.unnumbered}
+
+```{python}
+#| label: cell-setup
+#| output: false
+import functools
+
+from pylabrobot.liquid_handling import LiquidHandler
+from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+from pylabrobot.resources import (
+    Plate, Well, Lid, WellBottomType, CrossSectionType, PlateHolder,
+    STARLetDeck, PLT_CAR_L5AC_A00, set_volume_tracking,
+)
+from pylabrobot.resources.utils import create_ordered_items_2d
+from pylabrobot.resources.height_volume_functions import (
+    calculate_liquid_volume_container_2segments_round_vbottom,
+    calculate_liquid_height_in_container_2segments_round_vbottom,
+)
+```
+
+---
+
+## Step 1: Measure the plate {#measure}
+
+::: {.recipe}
+
+### The task
+
+Know which numbers a definition needs, and from which datum.
+
+| Measurement | Goes to | Datum |
+|---|---|---|
+| Plate footprint x, y | `size_x`, `size_y` | outer edges of the skirt |
+| Plate total height | `size_z` | bench surface to the top rim |
+| Well spacing | `item_dx`, `item_dy` | centre to centre, 9.0 mm on a 96-well SBS plate |
+| First well offset | `dx`, `dy` | plate origin to the **lower-left corner** of well A1, not its centre |
+| Well top opening | well `size_x`, `size_y` | inner diameter at the rim |
+| Well depth | well `size_z` | rim down to the inside bottom |
+| Bottom thickness | `material_z_thickness` | inside bottom to outside bottom |
+| Cone and cylinder heights | the geometry functions | the conical part, and the straight part above it |
+
+The numbers used below:
+
+```{python}
+#| label: cell-measure
+PLATE_X, PLATE_Y, PLATE_Z = 127.76, 85.48, 15.7    # <1>
+WELL_DIAMETER = 5.5                                # <2>
+CONE_HEIGHT = 9.0
+CYLINDER_HEIGHT = 6.0
+MATERIAL_Z = 0.5
+MAX_VOLUME = 200
+
+print("well depth:", CONE_HEIGHT + CYLINDER_HEIGHT, "mm")
+```
+
+1. 127.76 × 85.48 mm is the SBS footprint — the same for every standard microplate.
+2. A PCR well is a cone with a short straight section above it. Those two heights are what the
+   volume maths needs.
+
+[**Why it works.** A definition is measurements plus the functions that interpret them. Everything
+downstream — where a channel goes, how deep it dips, what "half full" means — is computed from
+these numbers, so a wrong measurement here is a wrong z-coordinate on the bench.]{.why}
+
+::: {.callout-note}
+## `dx`/`dy` are corner offsets
+
+`create_ordered_items_2d` places each item by its **lower-left corner**, not its centre. Shipped
+definitions record the arithmetic in a comment, e.g. `dx=10.87,  # 14.3-6.86/2` — the well centre
+minus half the well width.
 :::
 
-**Planned recipes**
+:::
 
-- Measure a plate
-- Choose a base class
-- Lay out wells and define geometry
-- Make it sit at the right height
-- Contribute it upstream
+---
+
+## Step 2: Choose a base class {#base-class}
+
+::: {.recipe}
+
+### The task
+
+Pick the class to subclass or instantiate. This table is written down nowhere else:
+
+| Base | Use when | Cost |
+|---|---|---|
+| `Resource` | arbitrary children at arbitrary positions | no indexing, no volume tracking |
+| `Container` | one addressable volume | no child grid |
+| `ItemizedResource` | a full rectangular grid of anything | must be a full grid, or it raises |
+| `Plate` | a grid of `Well`s, with lid support | plate semantics assumed |
+| `ContainerRack` | a grid of *holders*, each taking a removable container | access is indirect, via `ResourceHolder` |
+
+A PCR plate is a grid of wells with a lid, so it is a `Plate`. No subclassing is needed — a factory
+function returning a configured `Plate` is how every shipped definition does it.
+
+[**Why it works.** `Plate` is `Liddable` plus `ItemizedResource["Well"]`. The grid behaviour comes
+from `ItemizedResource`; `has_lid` and lid movement come from `Liddable`. Choosing `Plate` is
+choosing both.]{.why}
+
+::: {.callout-warning}
+## Gotcha: the grid is a contract
+
+`ItemizedResource` computes its dimensions from the item identifiers, and demands a complete
+rectangle:
+
+```{python}
+#| label: cell-grid-contract
+from pylabrobot.resources import cor_96_wellplate_360uL_Fb
+reference = cor_96_wellplate_360uL_Fb(name="reference")
+
+print("full:", reference._get_grid_size(["A1", "A2", "B1", "B2"]))
+try:
+    reference._get_grid_size(["A1", "A2", "B1"])      # <1>
+except ValueError as e:
+    print("sparse:", e)
+```
+
+1. B2 is missing, so the identifiers are not a rectangle.
+
+The check runs when `num_items_x` / `num_items_y` are read, not at construction — so a sparse
+resource builds fine and raises later. With a full grid you get `row`, `column`, `traverse`, and
+`get_quadrant` ([chapter 4](../part1/04_indexing.qmd)); without one you keep `num_items` and
+`get_item` and lose the rest.
+:::
+
+:::
+
+---
+
+## Step 3: Write the volume ↔ height functions {#geometry}
+
+::: {.recipe}
+
+### The task
+
+Give the well two functions: volume from a liquid height, and height from a volume.
+
+`pylabrobot.resources.height_volume_functions` ships 20 of them. The pair for a round V-bottom well
+made of a cone plus a cylinder:
+
+```{python}
+#| label: cell-geometry
+def volume_from_height(h: float) -> float:                          # <1>
+    return calculate_liquid_volume_container_2segments_round_vbottom(
+        d=WELL_DIAMETER, h_cone=CONE_HEIGHT, h_cylinder=CYLINDER_HEIGHT,
+        liquid_height=h)
+
+def height_from_volume(v: float) -> float:
+    return calculate_liquid_height_in_container_2segments_round_vbottom(
+        d=WELL_DIAMETER, h_cone=CONE_HEIGHT, h_cylinder=CYLINDER_HEIGHT,
+        liquid_volume=v)
+
+for h in (2.0, 5.0, 10.0):
+    print(f"  {h:4.1f} mm -> {volume_from_height(h):7.2f} uL")
+for v in (10.0, 50.0, 150.0):
+    print(f"  {v:5.1f} uL -> {height_from_volume(v):6.2f} mm")
+```
+
+1. A plain wrapper function, **not** `functools.partial` — see below.
+
+[**Why it works.** The relationship is not linear: the same 10 µL fills much more height in the cone
+than in the cylinder above it. The shipped functions integrate the two sections, so
+`compute_height_from_volume(50)` answers "how far down is the surface" correctly for this
+shape.]{.why}
+
+::: {.callout-warning}
+## Gotcha: `functools.partial` does not work here
+
+The natural way to bind the fixed dimensions fails:
+
+```{python}
+#| label: cell-partial-fails
+bound = functools.partial(
+    calculate_liquid_volume_container_2segments_round_vbottom,
+    d=WELL_DIAMETER, h_cone=CONE_HEIGHT, h_cylinder=CYLINDER_HEIGHT)
+
+try:
+    bound(5.0)                                        # <1>
+except TypeError as e:
+    print("TypeError:", str(e)[:95])
+```
+
+1. PLR calls the stored callable **positionally**, as `f(height)`.
+
+The function's first positional parameter is `d`, which the partial already bound by keyword, so a
+positional call collides with it. A wrapper function taking one argument avoids the problem — which
+is what every shipped definition uses.
+:::
+
+::: {.callout-note}
+## Custom shapes
+
+For a geometry none of the 20 functions describe, pass your own callables, or give the well
+`height_volume_data` — a dict of height → volume measured empirically.
+:::
+
+:::
+
+---
+
+## Step 4: Lay out the wells {#layout}
+
+::: {.recipe}
+
+### The task
+
+Create 96 wells in a grid, each with the geometry from step 3.
+
+```{python}
+#| label: cell-layout
+wells = create_ordered_items_2d(
+    Well,                                     # <1>
+    num_items_x=12,
+    num_items_y=8,
+    dx=11.15,                                 # <2>
+    dy=7.62,
+    dz=0.9,                                   # <3>
+    item_dx=9.0,
+    item_dy=9.0,
+    size_x=WELL_DIAMETER,                     # <4>
+    size_y=WELL_DIAMETER,
+    size_z=CONE_HEIGHT + CYLINDER_HEIGHT,
+    bottom_type=WellBottomType.V,
+    cross_section_type=CrossSectionType.CIRCLE,
+    material_z_thickness=MATERIAL_Z,
+    max_volume=MAX_VOLUME,
+    compute_volume_from_height=volume_from_height,
+    compute_height_from_volume=height_from_volume,
+)
+
+print("created:", len(wells), "wells")
+print("identifiers:", list(wells)[:4], "...")
+print("A1 location:", wells["A1"].location)
+```
+
+1. The class to instantiate. `create_ordered_items_2d` is generic — tip racks pass `TipSpot`.
+2. Corner offsets from step 1.
+3. `dz` is the height of the well's inside bottom above the plate's own origin.
+4. Everything from here down is forwarded to each `Well.__init__` as `**kwargs`.
+
+[**Why it works.** The helper returns an ordered dict keyed `A1`, `B1`, `C1`, … — column-major,
+matching the fill order PLR indexes by ([chapter 4](../part1/04_indexing.qmd#select)) — and computes
+each item's location from `dx`/`dy` plus the item pitch. Passing that dict as `ordered_items` is
+what makes the plate a full grid.]{.why}
+
+:::
+
+---
+
+## Step 5: Wrap it in a factory function {#factory}
+
+::: {.recipe}
+
+### The task
+
+Package the definition the way PLR ships definitions: a function taking a name and returning the
+resource.
+
+```{python}
+#| label: cell-factory
+def bmelab_96_wellplate_200uL_Vb(name: str, with_lid: bool = False) -> Plate:   # <1>
+    """A 96-well skirted PCR plate with conical wells.
+
+    - brand: (your lab)
+    - cat. no.: n/a
+    - material: polypropylene
+    """
+    return Plate(
+        name=name,
+        size_x=PLATE_X,
+        size_y=PLATE_Y,
+        size_z=PLATE_Z,
+        plate_type="skirted",                        # <2>
+        model=bmelab_96_wellplate_200uL_Vb.__name__,  # <3>
+        lid=None,
+        ordered_items=create_ordered_items_2d(
+            Well,
+            num_items_x=12, num_items_y=8,
+            dx=11.15, dy=7.62, dz=0.9,
+            item_dx=9.0, item_dy=9.0,
+            size_x=WELL_DIAMETER, size_y=WELL_DIAMETER,
+            size_z=CONE_HEIGHT + CYLINDER_HEIGHT,
+            bottom_type=WellBottomType.V,
+            cross_section_type=CrossSectionType.CIRCLE,
+            material_z_thickness=MATERIAL_Z,
+            max_volume=MAX_VOLUME,
+            compute_volume_from_height=volume_from_height,
+            compute_height_from_volume=height_from_volume,
+        ),
+    )
+
+plate = bmelab_96_wellplate_200uL_Vb(name="pcr_plate")
+print(plate)
+```
+
+1. The name follows `<vendor>_<n>_<type>_<volume>uL_<bottom>`
+   ([chapter 2](../part1/02_standard_labware.qmd#naming)), so it decodes like any shipped
+   definition.
+2. `plate_type` is `"skirted"`, `"semi-skirted"`, or `"non-skirted"`.
+3. `model` records which factory produced this object. It is the string written to the `type` field
+   when the deck is serialized, and the one `find_subclass` looks up on load
+   ([chapter 11](../part2/11_state.qmd#find-subclass)).
+
+[**Why it works.** A factory function rather than a subclass means the definition is data, not
+behaviour. It also means the docstring is where the catalog number lives, which is what makes
+`__doc__` searchable the way [chapter 2](../part1/02_standard_labware.qmd#find-labware)
+describes.]{.why}
+
+:::
+
+---
+
+## Step 6: Check it behaves like a plate {#validate}
+
+::: {.recipe}
+
+### The task
+
+Confirm the definition indexes, tracks, and sits on a deck.
+
+```{python}
+#| label: cell-validate
+print("wells:", plate.num_items, "| grid:", plate.num_items_x, "x", plate.num_items_y)   # <1>
+print("row A:", len(plate.row("A")), "| column 1:", len(plate.column(0)))
+print("quadrant tl:", len(plate.get_quadrant("tl")))
+
+well = plate.get_item("A1")
+print("depth:", well.get_size_z(), "mm | max:", well.max_volume, "uL")
+print("bottom:", well.bottom_type)
+```
+
+1. Reading `num_items_x` is what runs the full-grid check from step 2.
+
+```{python}
+#| label: cell-on-deck
+lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
+await lh.setup()
+carrier = PLT_CAR_L5AC_A00(name="carrier")
+lh.deck.assign_child_resource(carrier, rails=10)
+carrier[0] = plate                                        # <1>
+
+set_volume_tracking(True)
+plate["A1"][0].set_volume(100)
+
+print("absolute location:", plate.get_absolute_location())
+print("A1 volume:", plate["A1"][0].tracker.get_used_volume(), "uL")
+print("liquid height:", round(well.compute_height_from_volume(100), 2), "mm")   # <2>
+```
+
+1. The definition goes onto a carrier like any other plate.
+2. 100 µL of 200 stands 10.21 mm up a 15 mm well — the cone holds less per millimetre than the
+   cylinder above it.
+
+[**Why it works.** Nothing in `LiquidHandler` special-cases shipped definitions. A `Plate` with a
+full grid of `Well`s is a plate, wherever the object came from.]{.why}
+
+::: {.callout-note}
+## `ResourceDefinitionIncompleteError` will not tell you what is missing
+
+The class exists for definitions that are missing data, but **nothing in 0.2.2 raises it**
+([chapter 10](../part2/10_errors.qmd#dead-errors)). An incomplete definition fails later and
+elsewhere — a missing `max_volume` surfaces as a volume-tracking error, a wrong `dz` as a channel at
+the wrong height. The checks in this step are the validation.
+:::
+
+:::
+
+---
+
+## Step 7: Make it sit at the right height {#height}
+
+::: {.recipe}
+
+### The task
+
+Put the plate on something that holds it above the deck.
+
+```{python}
+#| label: cell-pedestal
+holder = PlateHolder(
+    name="pcr_holder",
+    size_x=PLATE_X, size_y=PLATE_Y, size_z=10.0,
+    pedestal_size_z=-3.0,                          # <1>
+)
+print("holder pedestal:", holder.pedestal_size_z)
+```
+
+1. **Required in 0.2.2.** A negative value means the plate sinks into the holder.
+
+```{python}
+#| label: cell-pedestal-missing
+try:
+    PlateHolder(name="bad", size_x=PLATE_X, size_y=PLATE_Y, size_z=10.0)   # <1>
+except ValueError as e:
+    print("ValueError:", str(e)[:80])
+```
+
+1. Omitting it raises at construction.
+
+[**Why it works.** `pedestal_size_z` is how far the plate's underside sits above or below the
+holder's own z origin. It has no safe default — a plate resting on a pedestal and a plate sunk into
+a recess differ by millimetres, and that difference is the channel's z. `PlateAdapter` computes the
+same thing from geometry for adapters like the magnet in
+[chapter 9](../part2/09_moving_labware.qmd#move-plate-to-magnet).]{.why}
+
+:::
+
+---
+
+## Step 8: Contribute it upstream {#contribute}
+
+::: {.recipe}
+
+### The task
+
+Turn a local definition into a shipped one.
+
+1. Put the factory function in `pylabrobot/resources/<vendor>/plates.py`, creating the vendor
+   package if it does not exist.
+2. Name it `<vendor>_<n>_<type>_<volume>uL_<bottom>`.
+3. Docstring: catalog number first, then manufacturer link, distributor, material, and notes —
+   the format in [chapter 2](../part1/02_standard_labware.qmd#find-labware).
+4. Export it from the vendor package's `__init__.py`, which is what makes it importable from
+   `pylabrobot.resources` and registers the class for deserialization
+   ([chapter 11](../part2/11_state.qmd#find-subclass)).
+5. Add a lid definition if the plate ships with one.
+6. `docs/contributor_guide/contributing-new-resources.md` in the PLR repository has the current
+   checklist.
+
+:::
+
+---
+
+## What geometry can and cannot express
+
+Three different answers, and the boundary is worth stating plainly:
+
+- **Geometry is fully extensible.** Sizes, offsets, grids, bottom shapes, and the volume ↔ height
+  relationship are all yours to define. Anything with a rectangular grid of containers can be
+  described.
+- **State is partially extensible.** A `Well` gets one volume tracker holding one number. You can
+  set it, save it, and load it ([chapter 11](../part2/11_state.qmd)), but the tracker's shape is
+  fixed — there is no per-liquid identity in 0.2.2
+  ([chapter 10](../part2/10_errors.qmd#dead-errors)).
+- **Connectivity is not modelled at all.** Volume trackers are per-container and independent.
+  Nothing flows between them: no PLR mechanism makes one well's volume change because another's
+  did. Labware with plumbing — microfluidic chips, flow cells, anything with channels between
+  compartments — can be described *geometrically*, and the connections between compartments have to
+  live in your own code.
+
+## What to remember
+
+- Measure to PLR's datums: `dx`/`dy` are the **corner** of well A1, not its centre.
+- A grid of wells with a lid is a `Plate`, built by a factory function, not a subclass.
+- `ItemizedResource` demands a complete rectangle; the check runs when `num_items_x` is read.
+- Bind well geometry with a **wrapper function**, not `functools.partial` — PLR calls the callable
+  positionally.
+- `create_ordered_items_2d` forwards its extra kwargs to each item's constructor.
+- `model=` is what gets serialized and looked up on load.
+- `PlateHolder.pedestal_size_z` is required and raises `ValueError` if omitted.
+- `ResourceDefinitionIncompleteError` never fires; validate by using the definition.

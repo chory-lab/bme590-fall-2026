@@ -330,3 +330,43 @@
   path: part3/13_system_design.qmd#config
   chapter: 13
   apis: "pylabrobot.config, Config, load_config, get_config_file, IniLoader, JsonLoader, MultiLoader, setup_logger"
+
+- title: "Measure a plate for a definition"
+  path: part4/14_custom_labware.qmd#measure
+  chapter: 14
+  apis: "size_x, size_y, size_z, item_dx, item_dy, dx, dy, dz, material_z_thickness, SBS footprint"
+
+- title: "Choose a labware base class"
+  path: part4/14_custom_labware.qmd#base-class
+  chapter: 14
+  apis: "Resource, Container, ItemizedResource, Plate, ContainerRack, Liddable, _get_grid_size"
+
+- title: "Write volume and height functions"
+  path: part4/14_custom_labware.qmd#geometry
+  chapter: 14
+  apis: "height_volume_functions, calculate_liquid_volume_container_2segments_round_vbottom, calculate_liquid_height_in_container_2segments_round_vbottom, compute_volume_from_height, compute_height_from_volume, height_volume_data, functools.partial"
+
+- title: "Lay out wells in a grid"
+  path: part4/14_custom_labware.qmd#layout
+  chapter: 14
+  apis: "create_ordered_items_2d, Well, WellBottomType, CrossSectionType, ordered_items"
+
+- title: "Wrap a definition in a factory function"
+  path: part4/14_custom_labware.qmd#factory
+  chapter: 14
+  apis: "Plate, plate_type, model, factory function, naming convention"
+
+- title: "Check a custom definition behaves like a plate"
+  path: part4/14_custom_labware.qmd#validate
+  chapter: 14
+  apis: "num_items_x, num_items_y, row, column, get_quadrant, ResourceDefinitionIncompleteError"
+
+- title: "Make a plate sit at the right height"
+  path: part4/14_custom_labware.qmd#height
+  chapter: 14
+  apis: "PlateHolder, pedestal_size_z, PlateAdapter, compute_plate_location"
+
+- title: "Contribute a definition upstream"
+  path: part4/14_custom_labware.qmd#contribute
+  chapter: 14
+  apis: "resources vendor package, __init__ exports, contributing-new-resources"
