@@ -10,9 +10,7 @@ name: Cookbook
 
 on:
   push:
-    # The cookbook currently lives on redesign-plan. Add "main" here (or
-    # replace this entry) when that branch merges.
-    branches: [redesign-plan]
+    branches: [main]
     paths:
       - "cookbook/**"
       - ".github/workflows/cookbook.yml"
