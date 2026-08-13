@@ -1,15 +1,596 @@
 ---
 title: "Process and system design"
+subtitle: "Steps, recovery policy, dry runs, logging, testing, run data, and config"
 ---
 
-::: {.callout-note appearance="simple"}
-Not yet written. See `PLAN.md` §3 for this chapter's scope.
+Parts I and II are about calling PLR. This chapter is about the code you write *around* those
+calls: the wrappers that decide what happens when a step fails, the record of what ran, and the
+files a run leaves behind.
+
+Most of what follows is ordinary Python composed around PLR, not PLR API. Four things in this
+chapter *are* PLR: its logging setup, `pylabrobot.io.capture`, `save_state_to_file`, and
+`pylabrobot.config`. Those are marked where they appear.
+
+## Setup {.unnumbered}
+
+```{python}
+#| label: cell-setup
+#| output: false
+import asyncio, functools, io, json, logging, pathlib, tempfile
+from datetime import datetime
+
+from pylabrobot.liquid_handling import LiquidHandler
+from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+from pylabrobot.liquid_handling.errors import ChannelizedError
+from pylabrobot.resources import (
+    STARLetDeck, PLT_CAR_L5AC_A00, cor_96_wellplate_360uL_Fb,
+    TIP_CAR_288_C00, opentrons_96_filtertiprack_200ul,
+    set_volume_tracking, set_tip_tracking,
+)
+from pylabrobot.resources.errors import NoTipError, TooLittleLiquidError
+
+lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
+await lh.setup()
+
+carrier = PLT_CAR_L5AC_A00(name="carrier")
+lh.deck.assign_child_resource(carrier, rails=10)
+carrier[0] = plate = cor_96_wellplate_360uL_Fb(name="plate")
+
+tips = TIP_CAR_288_C00(name="tip_carrier")
+lh.deck.assign_child_resource(tips, rails=2)
+tips[0] = rack = opentrons_96_filtertiprack_200ul(name="rack")
+
+set_volume_tracking(True)
+set_tip_tracking(True)
+plate["A1"][0].set_volume(1000)
+
+scratch = pathlib.Path(tempfile.mkdtemp(prefix="cookbook_run_"))
+```
+
+---
+
+## Write a protocol as steps {#steps}
+
+::: {.recipe}
+
+### The task
+
+Turn a script into a list of named steps that record what ran.
+
+```{python}
+#| label: cell-steps
+RUN_LOG = []                                            # <1>
+
+def step(name):
+    def decorator(fn):
+        @functools.wraps(fn)                            # <2>
+        async def wrapper(*args, **kwargs):
+            started = datetime.now()
+            try:
+                result = await fn(*args, **kwargs)
+                RUN_LOG.append({"step": name, "status": "ok",
+                                "seconds": (datetime.now() - started).total_seconds()})
+                return result
+            except Exception as e:
+                RUN_LOG.append({"step": name, "status": "failed",
+                                "error": f"{type(e).__name__}: {e}"})
+                raise                                   # <3>
+        return wrapper
+    return decorator
+
+
+@step("add buffer")
+async def add_buffer(lh, plate, vol):
+    await lh.pick_up_tips(rack["A1"])
+    await lh.aspirate(plate["A1"], vols=[vol])
+    await lh.dispense(plate["B1"], vols=[vol])
+    await lh.return_tips()
+
+await add_buffer(lh, plate, 50)
+print(RUN_LOG)
+```
+
+1. One list, appended to by every step.
+2. `functools.wraps` copies `__name__` and `__doc__` onto the wrapper, so tracebacks and
+   introspection still show the original function.
+3. Re-raising leaves the caller's error handling unchanged — the decorator observes, it does not
+   swallow.
+
+[**Why it works.** A decorator is a function that takes a function and returns a replacement. The
+replacement here calls the original and appends a record either way, so the step's own body stays
+free of bookkeeping.]{.why}
+
+::: {.callout-important}
+## Retry granularity follows idempotency
+
+Re-running a step re-runs everything in its body. `add_buffer` above aspirates and dispenses: run it
+twice and 100 µL moves, not 50. `lh.aspirate`, `lh.dispense`, and `lh.transfer` change state on the
+deck, so a step containing them produces a different result on a second call.
+
+Reads are different. `lh.summary()`, `deck.get_resource()`, `probe_tip_inventory()`, and
+`plate.get_quadrant()` return the same answer every time and can be repeated freely.
+
+Whatever unit you retry, that unit runs twice.
 :::
 
-**Planned recipes**
+**See also:** `RUN_LOG` here is the hand-rolled version of what PLR's own logger already emits —
+[below](#logging).
 
-- Compose recovery policy as decorators
-- Dry-run a protocol
-- Build a run record
-- Test without hardware
-- Manage run data and config
+:::
+
+---
+
+## Compose recovery policy as decorators {#recovery}
+
+::: {.recipe}
+
+### The task
+
+Give different failures different responses, without an `if` ladder inside every step.
+
+Three decorators, each handling one kind of failure:
+
+```{python}
+#| label: cell-recovery-decorators
+def retry(times, on, backoff=0.0):                      # <1>
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            for attempt in range(1, times + 1):
+                try:
+                    return await fn(*args, **kwargs)
+                except on as e:
+                    print(f"  retry: attempt {attempt} hit {type(e).__name__}")
+                    if attempt == times:
+                        raise
+                    if backoff:
+                        await asyncio.sleep(backoff)
+        return wrapper
+    return decorator
+
+
+def recover(exc_type, using):                           # <2>
+    def decorator(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            try:
+                return await fn(*args, **kwargs)
+            except exc_type as e:
+                print(f"  recover: {type(e).__name__} -> {using.__name__}")
+                await using(e, *args, **kwargs)         # <3>
+                return await fn(*args, **kwargs)
+        return wrapper
+    return decorator
+```
+
+1. Tier one: call it again, unchanged. Suits failures that are transient by nature — a serial
+   timeout, a USB hiccup.
+2. Tier two: run a fixup, then call it again. The fixup changes the situation, so the second call
+   is not identical to the first.
+3. The handler receives the exception plus the original arguments, so it can act on both.
+
+A third tier has no decorator: an exception nothing knows how to handle propagates, and the step
+fails.
+
+```{python}
+#| label: cell-recovery-stack
+async def advance_to_next_tip(exc, *args, **kwargs):    # <1>
+    print("  fixup: taking a tip from the next spot")
+
+class SerialTimeout(Exception):
+    pass
+
+attempts = {"n": 0}
+
+@retry(3, on=(SerialTimeout,), backoff=0.0)             # <2>
+@recover(NoTipError, using=advance_to_next_tip)         # <3>
+@step("add master mix")                                 # <4>
+async def add_master_mix(lh, plate):
+    attempts["n"] += 1
+    if attempts["n"] == 1:
+        raise SerialTimeout("device did not respond")
+    await lh.pick_up_tips(rack["A2"])
+    await lh.aspirate(plate["A1"], vols=[20])
+    await lh.dispense(plate["C1"], vols=[20])
+    await lh.return_tips()
+
+await add_master_mix(lh, plate)
+print("attempts:", attempts["n"])
+```
+
+1. A fixup is an ordinary async function. It is written once and reused by every step that touches
+   tips.
+2. Applied **last**, so it is outermost and sees the exception last.
+3. Applied second.
+4. Applied **first**, so it is innermost and closest to the function body.
+
+[**Why it works.** Decorators apply bottom-up: `@step` wraps the function, `@recover` wraps that,
+`@retry` wraps that. An exception raised in the body therefore travels outward through `step`, then
+`recover`, then `retry`. Whichever decorator is outermost gets the last word, so **reordering the
+stack changes which handler acts first** — and `@step` sitting innermost is what makes it record the
+individual attempt rather than the final outcome.]{.why}
+
+::: {.callout-warning}
+## Gotcha: a blind retry re-runs the channels that worked
+
+`ChannelizedError` reports failure per channel
+([chapter 10](../part2/10_errors.qmd#partial-failure)). Retrying the whole operation re-runs the
+successful channels too, which dispenses into those wells twice:
+
+```{python}
+#| label: cell-partial-retry
+error = ChannelizedError(errors={2: NoTipError("no tip"),
+                                 5: TooLittleLiquidError("empty")})
+used = list(range(8))
+
+blind = used                                            # <1>
+targeted = sorted(error.errors)                         # <2>
+
+print("blind retry re-runs channels:   ", blind)
+print("targeted retry re-runs channels:", targeted)
+print("double-dispensed by blind retry:", [c for c in blind if c not in targeted])
+```
+
+1. What `retry` above does: the same call, all eight channels.
+2. What the failed channels actually were.
+
+A recovery function for `ChannelizedError` reads `.errors` and re-runs only those channels,
+which means it needs the original `use_channels` argument — the reason `recover` passes
+`*args, **kwargs` to the handler.
+:::
+
+::: {.column-margin}
+**Python you need here**
+
+`@a` over `@b` over `def f` is `f = a(b(f))`. The one written first is applied last and ends up
+outermost. Exceptions travel from the body outward, so the outermost decorator is the last to see
+them.
+:::
+
+**See also:** the three tiers map onto
+[chapter 10](../part2/10_errors.qmd#portable-errors)'s groups — tracker errors are the recoverable
+tier, frontend guards and geometry errors generally are not.
+
+:::
+
+---
+
+## Dry-run a protocol {#dry-run}
+
+::: {.recipe}
+
+### The task
+
+Run the whole protocol with the motion calls disabled, so planning errors surface without moving
+anything.
+
+```{python}
+#| label: cell-dry-run
+DRY_RUN = True
+
+def skip_if_dry(fn):
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        if DRY_RUN:
+            print(f"  [dry] {fn.__name__}")
+            return None                                 # <1>
+        return await fn(*args, **kwargs)
+    return wrapper
+
+
+@skip_if_dry
+async def move_liquid(lh, plate):
+    await lh.pick_up_tips(rack["A3"])
+    await lh.aspirate(plate["A1"], vols=[10])
+    await lh.return_tips()
+
+rows = [("A1", 10), ("Z9", 5), ("A1", 99_000)]
+for well, vol in rows:                                  # <2>
+    try:
+        plate[well]
+    except IndexError:
+        print(f"  invalid well: {well}")
+        continue
+    if vol > plate["A1"][0].tracker.get_used_volume():
+        print(f"  not enough liquid for {vol} uL from {well}")
+
+await move_liquid(lh, plate)
+```
+
+1. The wrapper returns without calling the body, so nothing reaches the backend.
+2. Checks that read state still run — they are what a dry run is for. An unknown well identifier
+   raises `IndexError` ([chapter 7](../part2/07_worklists.qmd#validate)), so the lookup is wrapped
+   rather than tested for truthiness.
+
+[**Why it works.** The decorator replaces the call, so the protocol's control flow, loops, and
+validation all execute while the operations do not. What a dry run cannot catch is anything the
+frontend only discovers by executing: volume and tip errors are raised by the trackers during a real
+call, so skipping the call skips those checks too.]{.why}
+
+::: {.callout-note}
+## Two different "without hardware"
+
+Running against `LiquidHandlerChatterboxBackend` executes the frontend fully — trackers update,
+errors raise — and only the motion is absent. A dry run as above skips the frontend as well.
+
+The chatterbox validates state, not physics: it does not know that a 200 µL tip cannot hold 250 µL
+of liquid, or that a plate is not where the deck says it is
+([chapter 1](../part1/01_robot_on_screen.qmd#workcell)).
+:::
+
+**See also:** validating worklist rows before the loop, in
+[chapter 7](../part2/07_worklists.qmd#validate).
+
+:::
+
+---
+
+## Get a run record from PLR's logger {#logging}
+
+::: {.recipe}
+
+### The task
+
+Capture what the protocol did, without writing the recording code.
+
+**This one is PLR.** Every frontend operation already logs itself:
+
+```{python}
+#| label: cell-logging
+stream = io.StringIO()
+handler = logging.StreamHandler(stream)
+handler.setFormatter(logging.Formatter(
+    "%(relativeCreated)6dms %(levelname)s %(message)s"))     # <1>
+
+plr_logger = logging.getLogger("pylabrobot")                 # <2>
+plr_logger.addHandler(handler)
+plr_logger.setLevel(logging.DEBUG)                           # <3>
+
+await lh.pick_up_tips(rack["A4"])
+await lh.aspirate(plate["A1"], vols=[15])
+await lh.dispense(plate["D1"], vols=[15])       # <4>
+await lh.return_tips()
+
+plr_logger.removeHandler(handler)
+for line in stream.getvalue().splitlines():
+    print(line[:110])
+```
+
+1. `relativeCreated` is milliseconds since logging was initialised — per-step timing with no
+   instrumentation.
+2. PLR logs to one logger named `pylabrobot`, and sets `propagate = False` on it, so its records do
+   not reach the root logger's handlers.
+3. The operation records are emitted at `DEBUG`.
+4. The dispense is not decoration: `return_tips` raises `RuntimeError: Cannot drop tip with volume
+   15.0` if the tip still holds liquid ([chapter 8](../part2/08_tips.qmd#drop-return-discard)).
+
+[**Why it works.** `LiquidHandler._log_command` writes one debug record per operation containing the
+call's arguments, with resources rendered as names by `_format_param`. That is a call-level audit
+trail of the protocol, produced whether or not anyone is listening.]{.why}
+
+::: {.callout-note}
+## `verbose()` and log files
+
+`pylabrobot.verbose(True)` adds a console `StreamHandler`, and `configure()` calls it automatically
+when it detects a Jupyter kernel — which is why chatterbox output appears in notebooks without
+setup.
+
+`setup_logger(log_dir, level)` attaches a `FileHandler`. Given a directory it writes
+`pylabrobot-YYYYMMDD.log` inside it; given a path ending in `.log`, `.txt`, or `.jsonl` it writes
+that file directly.
+:::
+
+::: {.callout-warning}
+## Gotcha: `logger.exception()` only inside a handler
+
+`logging.getLogger(...).exception(msg)` attaches the *current* traceback. Called outside an
+`except` block there is no current exception, and the record says `NoneType: None`.
+:::
+
+**See also:** the `@step` decorator [above](#steps) records outcomes per step; this records
+individual calls. Both, together, are the run record.
+
+:::
+
+---
+
+## Test without hardware {#testing}
+
+::: {.recipe}
+
+### The task
+
+Check protocol code in CI, at four levels of cost.
+
+**1. Pure functions.** Worklist parsing ([chapter 7](../part2/07_worklists.qmd#csv-run)) and
+well-ID conversion ([chapter 4](../part1/04_indexing.qmd#labels)) are ordinary Python:
+
+```{python}
+#| label: cell-test-pure
+from pylabrobot.resources.utils import split_identifier
+
+assert split_identifier("B12") == ("B", "12")
+print("pure function assertions pass")
+```
+
+**2. Deck assertions.** The deck is state you can inspect before running anything:
+
+```{python}
+#| label: cell-test-deck
+assert lh.deck.has_resource("plate")
+assert plate.get_absolute_location().z > 0
+print("deck assertions pass")
+```
+
+**3. Whole protocols against the chatterbox.** Every recipe in this book is this level.
+
+**4. Record and replay.** **This one is PLR.** `pylabrobot.io.capture` records raw device I/O to a
+file, and `validate` replays a later run against it:
+
+```{python}
+#| label: cell-capture
+from pylabrobot.io.capture import start_capture, stop_capture, CaptureReader
+
+capture_file = scratch / "validation.json"
+start_capture(capture_file)                          # <1>
+await lh.pick_up_tips(rack["A5"])
+await lh.return_tips()
+stop_capture()
+
+recorded = json.loads(capture_file.read_text())
+print("version:", recorded["version"])
+print("commands recorded:", len(recorded["commands"]))   # <2>
+```
+
+1. Recording is global, not per-handler.
+2. **Zero** — see the warning below.
+
+[**Why it works.** `capturer.record` is called from the io transport layer — `io/serial.py`,
+`io/usb.py`, `io/ftdi.py`, `io/hid.py`, `io/socket.py` — so a capture contains the bytes exchanged
+with a device. `validate(capture_file)` then replays: each io call consumes the next recorded
+command, and `end_validation()` raises `ValidationError` if commands are left over.]{.why}
+
+::: {.callout-warning}
+## Gotcha: nothing is captured from a chatterbox
+
+The chatterbox has no io layer — it prints instead of talking to a device — so a capture taken
+around chatterbox operations contains an empty `commands` list, as above. Capture files can only be
+recorded against a backend with a real transport.
+:::
+
+::: {.callout-note}
+## Two things that are not in 0.2.2
+
+There is no `pylabrobot.testing` package — it exists only on `main`. `SaverBackend`, which 0.1.6
+used for this job, has been removed; `io.capture` replaces it.
+:::
+
+**See also:** `get_capture_or_validation_active()` reports whether either mode is on.
+
+:::
+
+---
+
+## Give a run its own directory {#run-data}
+
+::: {.recipe}
+
+### The task
+
+Put everything one run produces in one place, named so it can be found later.
+
+```{python}
+#| label: cell-run-data
+run_id = f"{datetime.now():%Y%m%d-%H%M%S}-plate42"      # <1>
+run_dir = scratch / run_id
+run_dir.mkdir()                                         # <2>
+
+lh.deck.save(str(run_dir / "layout.json"))              # <3>
+lh.deck.save_state_to_file(str(run_dir / "state_end.json"))
+(run_dir / "run_log.json").write_text(json.dumps(RUN_LOG, indent=2))
+
+print("run:", run_id)
+for f in sorted(run_dir.iterdir()):
+    print(f"  {f.name:18s} {f.stat().st_size:>8,} bytes")
+```
+
+1. A sortable timestamp plus something identifying, so directory listings order themselves.
+2. `mkdir()` raises `FileExistsError` if the run id repeats — which is the check, not a nuisance.
+3. **These two are PLR** ([chapter 11](../part2/11_state.qmd#save-layout)): the layout says what was
+   on the deck, the state says what was in it.
+
+[**Why it works.** The four artefacts answer four different questions — what was planned (the
+worklist), what was on the deck (layout), what was in it at the end (state), and what happened
+(the run log). Keeping them in one directory keyed by run id is what lets a result be traced back
+to the inputs that produced it.]{.why}
+
+::: {.callout-note}
+## Format follows job
+
+The [chapter 7](../part2/07_worklists.qmd#formats) rule, restated at run level: CSV for worklists,
+JSON for state and layout, append-only lines for the log.
+:::
+
+**See also:** `save_state_to_file` mid-run is a checkpoint; `load_state_from_file` resumes from it
+([chapter 11](../part2/11_state.qmd#layout-vs-state)).
+
+:::
+
+---
+
+## Configure PLR from a file {#config}
+
+::: {.recipe}
+
+### The task
+
+Set PLR's logging level and log directory without editing protocol code.
+
+**This one is PLR**, and its scope is narrow:
+
+```{python}
+#| label: cell-config
+from pylabrobot.config import Config, get_config_file
+import dataclasses
+
+print("Config fields:        ", [f.name for f in dataclasses.fields(Config)])       # <1>
+print("Config.Logging fields:", [f.name for f in dataclasses.fields(Config.Logging)])
+print("default:", Config())
+print("config file found:", get_config_file("pylabrobot"))    # <2>
+```
+
+1. `logging` is the **only** field. `Config` holds a level and a log directory, nothing else.
+2. Searches the current directory and every parent for `pylabrobot.ini` or `pylabrobot.json`,
+   returning `None` if there is none.
+
+A config file looks like this:
+
+```{python}
+#| eval: false
+# pylabrobot.ini
+[logging]
+level = DEBUG
+log_dir = ./logs
+```
+
+[**Why it works.** `pylabrobot/__init__.py` calls `load_config("pylabrobot", create_default=False)`
+at import time and passes the result to `configure()`, which calls `setup_logger()`. The file is
+read once, when you first import PLR.]{.why}
+
+::: {.callout-warning}
+## Gotcha: device addresses do not go here
+
+`Config` has one field, `logging`. There is nowhere in it for serial ports, USB identifiers, or
+host/port settings — those are constructor arguments to the backend or the `Visualizer`
+(`ws_port=2121`, `fs_port=1337`). Keeping them out of protocol code means your own config file,
+read with `json`, `tomllib`, or `configparser`, and passed to the constructor:
+
+```{python}
+#| eval: false
+settings = json.loads(pathlib.Path("instrument.json").read_text())
+backend = STARBackend(**settings["star"])
+```
+:::
+
+**See also:** `IniLoader`, `JsonLoader`, and `MultiLoader` in `pylabrobot.config.formats` are the
+readers behind `load_config`.
+
+:::
+
+---
+
+## What to remember
+
+- A decorator that records, retries, or skips leaves the step body free of that concern.
+  `functools.wraps` keeps the wrapped function's identity.
+- **Decorators apply bottom-up, so the outermost sees the exception last.** Reordering the stack
+  changes which handler acts first.
+- Retrying re-runs everything in the retried unit. Aspirate and dispense change state; reads do not.
+- A blind retry after `ChannelizedError` re-runs the channels that succeeded. Read `.errors` and
+  re-run only those.
+- PLR logs every frontend call at `DEBUG` on the `pylabrobot` logger, which does not propagate to
+  root. `relativeCreated` gives per-step timing.
+- `io.capture` records device I/O from the transport layer — **nothing from a chatterbox**. No
+  `pylabrobot.testing` in 0.2.2, and `SaverBackend` is gone.
+- One directory per run: worklist, layout, end state, run log.
+- `pylabrobot.config` configures **logging only**. Addresses are constructor arguments.

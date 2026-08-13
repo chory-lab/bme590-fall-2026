@@ -295,3 +295,38 @@
   path: part2/12_hardware.qmd#error-families
   chapter: 12
   apis: "STARFirmwareError, STARModuleError, ClotDetectedError, star_firmware_string_to_error, TecanError, VantageFirmwareError"
+
+- title: "Write a protocol as steps"
+  path: part3/13_system_design.qmd#steps
+  chapter: 13
+  apis: "functools.wraps, decorators, idempotency, run log"
+
+- title: "Compose recovery policy as decorators"
+  path: part3/13_system_design.qmd#recovery
+  chapter: 13
+  apis: "decorator order, retry, recover, ChannelizedError.errors, partial retry, asyncio.sleep"
+
+- title: "Dry-run a protocol"
+  path: part3/13_system_design.qmd#dry-run
+  chapter: 13
+  apis: "dry run, LiquidHandlerChatterboxBackend, validation before execution"
+
+- title: "Get a run record from PLR's logger"
+  path: part3/13_system_design.qmd#logging
+  chapter: 13
+  apis: "logging, pylabrobot logger, _log_command, relativeCreated, logger.exception, verbose, setup_logger, propagate"
+
+- title: "Test without hardware"
+  path: part3/13_system_design.qmd#testing
+  chapter: 13
+  apis: "pylabrobot.io.capture, start_capture, stop_capture, validate, end_validation, CaptureReader, ValidationError, get_capture_or_validation_active"
+
+- title: "Give a run its own directory"
+  path: part3/13_system_design.qmd#run-data
+  chapter: 13
+  apis: "pathlib, datetime, run id, deck.save, save_state_to_file, provenance"
+
+- title: "Configure PLR from a file"
+  path: part3/13_system_design.qmd#config
+  chapter: 13
+  apis: "pylabrobot.config, Config, load_config, get_config_file, IniLoader, JsonLoader, MultiLoader, setup_logger"

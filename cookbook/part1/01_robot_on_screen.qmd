@@ -213,7 +213,9 @@ needs a websocket and a file server, and in a notebook kernel it serves them fin
 here runs headless.
 :::
 
-**See also:** the visualizer host and port live in `pylabrobot.config` — [chapter 13](../part3/13_system_design.qmd) keeps addresses out of protocol code.
+**See also:** `ws_port` (2121) and `fs_port` (1337) are constructor arguments to `Visualizer`, not
+settings — `pylabrobot.config` configures logging only
+([chapter 13](../part3/13_system_design.qmd#config)).
 
 :::
 

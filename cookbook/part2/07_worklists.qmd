@@ -128,22 +128,32 @@ Check every row of a worklist before a single tip moves.
 
 ```{python}
 #| label: cell-validate
+checked = rows + [{"target": "Z9", "volume": "25"}]                 # <1>
+
 errors = []
-for i, row in enumerate(rows, start=1):                            # <1>
-    if not target[row["target"]]:                                  # <2>
-        errors.append(f"row {i}: no such well {row['target']}")
-    if float(row["volume"]) > source["A1"][0].tracker.get_free_volume():   # <3>
+for i, row in enumerate(checked, start=1):                         # <2>
+    try:
+        target[row["target"]]                                      # <3>
+    except IndexError as e:
+        errors.append(f"row {i}: {e}")
+        continue
+    if float(row["volume"]) > source["A1"][0].tracker.get_used_volume():   # <4>
         errors.append(f"row {i}: source has too little liquid")
-print("errors:", errors)                                           # <4>
+
+print("errors:")
+for e in errors:
+    print("  ", e)                                                 # <5>
 ```
 
-1. `rows` from the previous recipe — the worklist is a plain list of dicts, so validation is just
+1. One deliberately bad row: Z9 is not a well on a 96-well plate.
+2. `rows` from the previous recipe — the worklist is a plain list of dicts, so validation is just
    a loop.
-2. `target[...]` returns `[]` for a nonexistent well — falsy, so "does this well exist" is one
-   `if`.
-3. `get_free_volume()` on the source's tracker answers "is there enough liquid" without guessing.
-4. An empty list means go. This is the entire job: cheap, read-only, and it catches the failures
-   that cost a run.
+3. **An unknown identifier raises `IndexError`**, it does not return an empty list:
+   `Item with identifier 'Z9' does not exist on resource 'target'.` The lookup has to be wrapped,
+   not tested for truthiness.
+4. `get_used_volume()` on the source's tracker answers "is there enough liquid to draw" without
+   guessing.
+5. An empty list means go. This is the entire job: cheap, read-only, and it moves no tips.
 
 [**Why it works.** Validation is pure Python over the same data structure the driver reads. No
 robot calls happen, so a bad worklist costs milliseconds instead of a ruined run. The discipline —
