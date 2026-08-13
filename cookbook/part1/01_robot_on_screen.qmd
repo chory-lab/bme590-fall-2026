@@ -8,8 +8,7 @@ title: "Getting a robot on screen"
 
 ::: {.recipe}
 
-Start a simulated liquid handler, look at what is on it, and shut it down — the whole lifecycle, in
-less than ten lines.
+Start a simulated liquid handler, look at what is on it, and shut it down.
 
 ```{python}
 #| label: cell-first-robot
@@ -50,21 +49,12 @@ Recipes in this book that seed a well with `set_volume(...)` are establishing wh
 there, so the narration reads correctly and so the recipe still holds once tracking is on.
 :::
 
-**The narration is the teaching aid.**
+The frontend produces the same plan whichever backend is attached; the backend is the only
+difference. The frontend owns tracking and validation, the backend owns motion, and the chatterbox
+implements the first and skips the second.
 
-Run the same protocol against the chatterbox and against a real machine and the frontend produces
-the identical plan — the backend is the only difference. When a recipe in this book shows you its
-output, that is not a demo of the recipe, it is the recipe: **the printout is what the machine would
-have done.** Read it.
-
-Under the hood this works because PLR's frontend owns *tracking and validation*, and the backend
-owns *motion*. Chatterbox executes the first half faithfully and skips the second.
-
-**~15 machine types ship a chatterbox.**
-
-The same trick exists for thermocyclers, incubators, centrifuges, sealers, plate readers, pumps,
-scales, and more — see the [workcell recipe](#workcell). A complete lab can be simulated with zero
-hardware.
+Chatterbox backends also exist for thermocyclers, incubators, centrifuges, sealers, plate readers,
+pumps, and scales — about 15 machine types. See the [workcell recipe](#workcell).
 
 :::
 
@@ -99,9 +89,7 @@ asyncio.run(main())
 ::: {.column-margin}
 **Python you need here**
 
-`asyncio.run(main())` is the standard script entry point: it creates the loop, runs `main()` to
-completion, and tears the loop down. The same function in a script form is a normal import-time
-pattern you will see in every PLR example that runs outside a notebook.
+`asyncio.run(main())` creates the loop, runs `main()` to completion, and tears the loop down.
 
 `async with lh:` is shorthand for `try: await lh.setup() ... finally: await lh.stop()`. It calls
 `setup()` on entry and `stop()` on exit — see [the setup/stop recipe](#setup-stop).
@@ -116,7 +104,7 @@ Jupyter. When you take a recipe into a script, wrap it in `asyncio.run(main())` 
 
 ::: {.recipe}
 
-Ask PLR what is actually on the deck, and get a flat list you can program against.
+Read what is on the deck as a flat list.
 
 ```{python}
 #| label: cell-summary
@@ -165,12 +153,6 @@ await vis.stop()                                      # <3>
 2. `vis.setup()` starts two servers: a websocket on `2121` that streams deck state, and a file
    server on `1337` that serves the page. Open the file-server URL it prints.
 3. `vis.stop()` tears the servers down. Same `setup`/`stop` discipline as everything else.
-
-**The one thing that needs a browser.**
-
-The visualizer is the only recipe in this book that will not work under in-browser execution: it
-needs a websocket and a file server, and in a notebook kernel it serves them fine. Everything else
-here runs headless.
 
 **See also:** `ws_port` (2121) and `fs_port` (1337) are constructor arguments to `Visualizer`, not
 settings — `pylabrobot.config` configures logging only
@@ -229,8 +211,7 @@ await inc.stop()
    chatterbox backend is the simulated half.
 2. Machines share the `setup`/`stop` discipline, and like the liquid handler they enforce it with
    `@need_setup_finished` on their operations.
-3. `run_pcr_profile` is the whole reason to own one of these. The chatterbox prints the protocol it
-   was handed, step by step — that printout is what a real machine would have executed.
+3. The chatterbox prints the profile it was handed, step by step.
 4. The `Incubator` takes `racks` (its plate-carrier shelves) and a `loading_tray_location`. An
    empty rack list is fine for a first look.
 5. Real machine questions have real answers: how many free sites, which plate is where, what
@@ -242,9 +223,8 @@ Chatterbox validates *state* — volumes, tips, positions, temperature calls —
 not notice that a 200 µL tip cannot aspirate 250 µL without blowing out, or that a well is not
 where the deck thinks it is. Simulate for logic; verify against hardware.
 
-**See also:** the thermocycler is where [chapter 9](../part2/09_moving_labware.qmd)'s off-deck
-bookkeeping becomes real: you will move a plate to a real or simulated thermocycler and have to tell
-PLR about it.
+**See also:** moving a plate to a thermocycler and recording it is
+[chapter 9](../part2/09_moving_labware.qmd#off-deck-moves).
 
 :::
 
@@ -286,8 +266,8 @@ RuntimeError: The setup has not finished. See `setup`.
 [Chapter 13](../part3/13_system_design.qmd) composes recovery policy out of the same idea.
 :::
 
-**See also:** against chatterbox, forgetting `stop()` is harmless. Against real hardware it can
-leave a machine in a bad state, which is why the habit is established here rather than later.
+**See also:** against the chatterbox, omitting `stop()` has no effect. Against hardware it can
+leave the machine connected and in an undefined state.
 
 :::
 

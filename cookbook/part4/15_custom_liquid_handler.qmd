@@ -33,9 +33,9 @@ Start from a backend that already works.
 implementation of the interface: every abstract member present, every operation handled. It prints
 instead of moving, which is the only thing separating it from a driver.
 
-Read it before writing anything. The two things to take from it are the shape of each method —
-`async def aspirate(self, ops, use_channels)` — and the fact that a backend receives **lists of
-operation objects**, not the arguments the caller passed to `lh.aspirate`.
+Two things to take from it: the shape of each method, `async def aspirate(self, ops, use_channels)`,
+and that a backend receives **lists of operation objects**, not the arguments the caller passed to
+`lh.aspirate`.
 
 :::
 
@@ -98,7 +98,7 @@ occupancy diameter for every channel. Override the ones your machine can do.
 
 ::: {.recipe}
 
-Write the methods that are the machine.
+Implement the six core members.
 
 ```{python}
 #| label: cell-device
@@ -210,7 +210,7 @@ Each operation carries what the backend needs:
 
 ::: {.recipe}
 
-Drive the backend with an ordinary `LiquidHandler` and watch the device traffic.
+Drive the backend with an ordinary `LiquidHandler` and read the device traffic.
 
 ```{python}
 #| label: cell-run
@@ -252,7 +252,7 @@ for command in device.sent:
 
 ::: {.recipe}
 
-Understand what a caller sees when they ask for a capability the machine lacks.
+What a caller sees when they ask for a capability the machine lacks.
 
 ```{python}
 #| label: cell-refuse
@@ -333,7 +333,7 @@ class GantryBackend(LiquidHandlerBackend):
 
 ::: {.recipe}
 
-Get from PLR's coordinates to the machine's.
+Convert PLR's coordinates to the machine's.
 
 PLR gives the backend deck coordinates in millimetres:
 `resource.get_absolute_location() + op.offset`, with the deck origin at its own front-left-bottom

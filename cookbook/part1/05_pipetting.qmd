@@ -127,7 +127,7 @@ channels can behave differently; `use_channels` (below) is how you address a sub
 
 ::: {.recipe}
 
-Aspirate from the side wall of a well, or the last liquid in a corner — anywhere but dead center.
+Aspirate from a position in the well other than its centre.
 
 ```{python}
 #| label: cell-offsets
@@ -198,7 +198,7 @@ await lh.drop_tips(tip_rack["A1:H1"])
 4. `spread="wide"` puts channels as far apart as the trough allows (their spacing is `min_spacing`,
    default 9 mm); `spread="tight"` pulls them as close as the machine allows. The third value,
    `spread="custom"`, hands the placement back to you — supply `offsets` yourself, one per channel,
-   and PLR computes nothing. That is the escape hatch when neither automatic packing fits.
+   and PLR computes nothing.
 
 **Gotcha: `vols` must match `use_channels`, even for one well.**
 
@@ -253,7 +253,7 @@ them, but chatterbox prints the op it was given. Verify a mix with the machine o
 
 ::: {.recipe}
 
-Understand why multi-channel operations refuse a well, and how to check the spacing.
+Check channel spacing, and read the error when channels do not fit.
 
 ```{python}
 #| label: cell-channel-spacing
@@ -286,8 +286,7 @@ specifically by the compartment algorithm when a well has `no_go_zones` set. Cat
 probing, or fix the plan: fewer channels, a wider resource, or `spread="custom"` with your own
 offsets.
 
-**See also:** `spread="custom"` in the `#spread` recipe — the escape hatch when the automatic
-packing cannot work but you know the exact offsets you want.
+**See also:** `spread="custom"` in the [spread recipe](#spread) takes explicit per-channel offsets.
 
 :::
 

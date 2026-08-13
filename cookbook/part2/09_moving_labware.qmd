@@ -98,7 +98,7 @@ the gripper and the plate, it can be left behind or dragged. Move the lid first
 
 ::: {.recipe}
 
-Deck a plate's lid somewhere while you pipette, then re-lid it.
+Move a plate's lid off, then put it back.
 
 ```{python}
 #| label: move-lid
@@ -177,9 +177,9 @@ dz=27.5,              # refers to magnet hole bottom
 plate_z_offset=0.0,   # adjust at runtime based on plate's well geometry
 ```
 
-`plate_z_offset=0.0` is a *default*, not a measurement for your plate. A skirted PCR plate and a
-deep-well block do not sit at the same height on the same magnet. Check it against your labware
-before running unattended, or you will aspirate air, or worse, drive into the plate.
+`plate_z_offset=0.0` is a default, not a measurement for your plate. A skirted PCR plate and a
+deep-well block do not sit at the same height on the same magnet. An unchecked value puts the tip
+above the liquid or into the plate bottom.
 :::
 
 ::: {.callout-warning title="Gotcha: use the snake_case name"}
@@ -220,7 +220,7 @@ await lh.aspirate(
 
 ::: {.recipe}
 
-Pull the top plate off a hotel stack without tracking the index yourself.
+Take the top plate off a stack without tracking the index yourself.
 
 ```{python}
 #| label: stack
@@ -250,8 +250,7 @@ stack can run out.
 
 ::: {.recipe}
 
-An operator carried a plate to a thermocycler across the room and brought it back to a different
-position. No PLR call happened. Fix the model.
+A plate was moved by hand, with no PLR call. Update the model to match.
 
 ```{python}
 #| label: off-deck

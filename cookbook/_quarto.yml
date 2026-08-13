@@ -60,7 +60,7 @@ format:
     toc-expand: 2
     code-annotations: hover
     code-copy: true
-    code-overflow: wrap
+    code-overflow: scroll
     code-tools: false
     highlight-style: github
     fig-responsive: true

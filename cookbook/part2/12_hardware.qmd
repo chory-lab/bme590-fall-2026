@@ -87,7 +87,7 @@ print(params[:8])
 
 ::: {.recipe}
 
-Understand why a misspelled kwarg is caught on one backend and silently ignored on another.
+A misspelled kwarg is caught on one backend and ignored on another.
 
 ```{python}
 #| label: cell-kwargs-validation
@@ -224,8 +224,7 @@ instrument rather than a generic one.
 
 ::: {.recipe}
 
-Move one channel to a coordinate, outside any pipetting operation — for teaching positions or
-recovering from a crash.
+Move one channel to a coordinate, outside any pipetting operation.
 
 ```{python}
 #| label: cell-jog
@@ -262,7 +261,7 @@ except NotImplementedError as e:
 
 ::: {.recipe}
 
-Take apart a Hamilton firmware error and find out which module failed and why.
+Read which module failed from a Hamilton firmware error.
 
 ```{python}
 #| label: cell-error-families

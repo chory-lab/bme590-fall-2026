@@ -75,7 +75,7 @@ standard-curve or dilution patterns in [chapter 7](../part2/07_worklists.qmd).
 
 ::: {.recipe}
 
-Tell PLR "only these channels act" for a block of pipetting, then revert.
+Set the channels used by every operation in a block, then revert.
 
 ```{python}
 #| label: cell-use-channels

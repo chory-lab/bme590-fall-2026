@@ -3,7 +3,7 @@ title: "Define custom labware: a PCR plate"
 ---
 
 **0.2.2 ships no PCR plate.** `nest_96_wellplate_100ul_pcr_full_skirt` existed in older PLR and has
-no replacement, so this is a definition worth having rather than an exercise.
+no replacement.
 
 ## Setup {.unnumbered}
 
@@ -31,7 +31,7 @@ from pylabrobot.resources.height_volume_functions import (
 
 ::: {.recipe}
 
-Know which numbers a definition needs, and from which datum.
+The numbers a definition needs, and the datum each is measured from.
 
 | Measurement | Goes to | Datum |
 |---|---|---|
@@ -76,7 +76,7 @@ minus half the well width.
 
 ::: {.recipe}
 
-Pick the class to subclass or instantiate. This table is written down nowhere else:
+Pick the class to subclass or instantiate:
 
 | Base | Use when | Cost |
 |---|---|---|
@@ -331,7 +331,7 @@ the wrong height. The checks in this step are the validation.
 
 ::: {.recipe}
 
-Put the plate on something that holds it above the deck.
+Place the plate in a holder.
 
 ```{python}
 #| label: cell-pedestal

@@ -33,7 +33,7 @@ walks a grid, there is probably a built-in for it.
 
 ::: {.recipe}
 
-Choose a set of wells in one expression. This table is the whole grammar:
+Choose a set of wells in one expression. The grammar:
 
 | Expression | Selects | Result |
 |---|---|---|
@@ -184,7 +184,7 @@ within a quadrant; defaults are sensible for most cases.
 
 ::: {.recipe}
 
-Turn `"C7"` into `(2, 6)`, or `7` into `"H"` — the plumbing behind every well-ID conversion.
+Convert `"C7"` to `(2, 6)`, or `7` to `"H"`.
 
 ```{python}
 #| label: cell-labels
@@ -211,7 +211,7 @@ CSV row validation.
 
 ::: {.recipe}
 
-Look at a plate as a grid, marking which wells have liquid.
+Print a plate as a grid, marking which wells have liquid.
 
 ```{python}
 #| label: cell-summary-map

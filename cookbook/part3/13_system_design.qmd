@@ -291,7 +291,7 @@ of liquid, or that a plate is not where the deck says it is
 
 ::: {.recipe}
 
-Capture what the protocol did, without writing the recording code.
+Record what the protocol did without writing the recording code.
 
 **This one is PLR.** Every frontend operation already logs itself:
 
@@ -417,7 +417,7 @@ used for this job, has been removed; `io.capture` replaces it.
 
 ::: {.recipe}
 
-Put everything one run produces in one place, named so it can be found later.
+Write everything one run produces into one directory.
 
 ```{python}
 #| label: cell-run-data
@@ -435,7 +435,7 @@ for f in sorted(run_dir.iterdir()):
 ```
 
 1. A sortable timestamp plus something identifying, so directory listings order themselves.
-2. `mkdir()` raises `FileExistsError` if the run id repeats — which is the check, not a nuisance.
+2. `mkdir()` raises `FileExistsError` if the run id repeats.
 3. **These two are PLR** ([chapter 11](../part2/11_state.qmd#save-layout)): the layout says what was
    on the deck, the state says what was in it.
 

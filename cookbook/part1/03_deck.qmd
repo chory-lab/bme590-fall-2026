@@ -87,7 +87,7 @@ plate sits and is [required in 0.2.2](../part4/14_custom_labware.qmd) — omit i
 
 ::: {.recipe}
 
-Figure out where a resource is without misreading the coordinates.
+Read where a resource is.
 
 ```{python}
 #| label: cell-locations
@@ -148,10 +148,9 @@ print("highest known point on deck:", lh.deck.get_highest_known_point())   # <4>
 - Name conflicts answer *identity*: is a resource with this name already on the deck
   ([chapter 2](../part1/02_standard_labware.qmd#get-resource)).
 
-Different questions, both raise `ValueError`, both worth catching separately.
+Different questions; both raise `ValueError`.
 
-**See also:** `ignore_collision=True` on `assign_child_resource` when you *know* better — a rare
-escape hatch, not a habit.
+**See also:** `ignore_collision=True` on `assign_child_resource` skips the placement check.
 
 :::
 

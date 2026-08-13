@@ -35,7 +35,7 @@ carrier[1] = trough = nest_1_troughplate_195000uL_Vb(name="buffer")
 
 ::: {.recipe}
 
-Read `nest_1_troughplate_195000uL_Vb` and know, without looking it up, roughly what it is.
+Decode `nest_1_troughplate_195000uL_Vb` without looking it up.
 
 The naming convention is a decoder ring. Every current name is built the same way:
 
@@ -74,12 +74,10 @@ as **deprecation shims** marked `# remove v1b1` in the source — e.g. `Cor_96_w
 
 The catch: nothing about a shim tells you it is scheduled for deletion — no warning, no
 `DeprecationWarning`, just a name that quietly stops existing one release later. Prefer the
-snake_case current names whenever you have a choice. [Chapter 9](../part2/09_moving_labware.qmd#move-plate-to-magnet)
-shows one biting in practice.
+snake_case current names. [Chapter 9](../part2/09_moving_labware.qmd#move-plate-to-magnet) uses one.
 :::
 
-**See also:** `resources/diy/` — community 3D-printed labware, worth browsing even if you never
-print anything.
+**See also:** `resources/diy/` holds community 3D-printed labware definitions.
 
 :::
 
@@ -113,8 +111,8 @@ print(cor_96_wellplate_360uL_Fb.__doc__.splitlines()[0])   # <1>
 - **Grep the source** for the catalog number — it may be defined under a slightly different name.
 - **Use the closest definition** and note the difference in a comment. Nobody measures a well to
   the micron.
-- **Define it yourself** — that is the subject of chapter 14, and 0.2.2 famously ships no PCR plate
-  at all, so the chapter builds one.
+- **Define it yourself** — [chapter 14](../part4/14_custom_labware.qmd). 0.2.2 ships no PCR plate,
+  so that chapter builds one.
 
 **See also:** the vendor package list is `pylabrobot.resources.*` — 26 packages including the new-in-0.2.2
 `bioer`, `btx`, `diy`, `greiner`, `imcs`, and `perkin_elmer`. The old `corning_axygen`,
@@ -128,8 +126,7 @@ print(cor_96_wellplate_360uL_Fb.__doc__.splitlines()[0])   # <1>
 
 ::: {.recipe}
 
-Given a deck you did not build, find the plate called "sample_plate" — or fail loudly if it is not
-there.
+Find the plate named "sample_plate" on a deck you did not build, or raise if it is absent.
 
 ```{python}
 #| label: cell-get-resource

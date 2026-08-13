@@ -335,7 +335,7 @@ chapter's setup does; the `no_*` context managers scope the suppression instead.
 
 ::: {.recipe}
 
-Know that the class imports and can never fire, so it is not used as a check.
+`CrossContaminationError` imports and is never raised.
 
 ```{python}
 #| label: cell-dead-errors

@@ -98,9 +98,8 @@ in [chapter 10](../part2/10_errors.qmd#no-tracking).
 RuntimeError: Cannot drop tip with volume 50.0
 ```
 
-`discard_tips` defaults to **`True`** — it throws the tip away with the liquid still in it and does
-not complain. A tip returned to a rack with liquid in it is a contamination path; a discarded one
-is not, which is the distinction the differing defaults encode.
+`discard_tips` defaults to **`True`** and discards the tip with the liquid still in it. A tip
+returned to a rack still holding liquid is a contamination path; a discarded one is not.
 :::
 
 **See also:** the same `RuntimeError` appears in
@@ -115,7 +114,7 @@ loaded; `*96` variants (`return_tips96`, `discard_tips96`) work the same way for
 
 ::: {.recipe}
 
-Pick up tips, use them, and put them away — without writing the put-away call.
+Pick up tips and put them away without writing the put-away call.
 
 ```{python}
 #| label: cell-use-tips
@@ -214,8 +213,7 @@ over a plate's wells; the batching helpers in
 
 ::: {.recipe}
 
-Tell PLR which spots hold tips — after loading a partly used rack, or after someone took tips by
-hand.
+Set which spots the model believes hold tips, after loading a partly used rack or a manual change.
 
 ```{python}
 #| label: cell-rack-state
@@ -251,7 +249,7 @@ than globally. A rack with disabled trackers accepts pick-ups from empty spots w
 
 ::: {.recipe}
 
-Ask the machine which spots actually hold tips, and pack partly used racks into fewer full ones.
+Read which spots hold tips from the machine, and pack partly used racks into fewer racks.
 
 ```{python}
 #| label: cell-probe

@@ -41,10 +41,8 @@ print("scratch dir:", scratch)
 ::: {.column-margin}
 **Python you need here**
 
-`csv` and `pathlib` are the two imports of this chapter. A worklist is plain data; the `csv`
-module reads and writes it, `pathlib.Path` handles paths without string surgery. Reserve
-`pandas` for when you actually need its features — grouping, statistics, plotting — not for reading
-three columns (see the note in the CSV recipe).
+`csv` and `pathlib` are the two imports of this chapter. A worklist is plain data: the `csv`
+module reads and writes it, and `pathlib.Path` handles paths without string surgery.
 :::
 
 ---
@@ -57,6 +55,7 @@ Take a spreadsheet of transfers — one row per transfer — and execute it.
 
 ```{python}
 #| label: cell-csv-run
+#| output: false
 worklist = scratch / "worklist.csv"
 with open(worklist, "w", newline="") as f:                   # <1>
     writer = csv.writer(f)
@@ -66,7 +65,6 @@ with open(worklist, "w", newline="") as f:                   # <1>
 
 with open(worklist, newline="") as f:                        # <2>
     rows = list(csv.DictReader(f))
-print(rows)
 
 tip = 0                                                      # <3>
 for row in rows:
@@ -84,15 +82,10 @@ for row in rows:
    this.
 2. `csv.DictReader` gives each row as a dict keyed by the header — `{"target": "B1", "volume": "25"}`.
    Values are strings; the `float()` when you use them is the reminder.
-3. The loop is the whole "driver": one tip per transfer, `lh.transfer` per row. Five lines of glue
-   between the file and the robot.
+3. The driver loop: one tip per transfer, `lh.transfer` per row.
 
-**pandas.**
-
-A three-column worklist does not need a `DataFrame`. The stdlib `csv` module reads it faster than
-pandas even loads, with zero dependencies. Reach for pandas when the work demands it — a 10,000-row
-file you also want to group and plot — not for reading rows. The seam stays identical either way:
-it produces a list of `(target, volume)` pairs.
+`pandas` is not required. The stdlib `csv` module reads a worklist with no third-party
+dependency, and either way the seam produces the same thing: a list of `(target, volume)` pairs.
 
 **See also:** `#validate` runs checks on these rows *before* the loop; `#batching` reorders them
 for multi-channel heads.
@@ -195,7 +188,7 @@ not from the file length.
 
 ::: {.recipe}
 
-After the run, produce a plate map your colleagues can open.
+Write the final well volumes back out as CSV.
 
 ```{python}
 #| label: cell-results
@@ -238,7 +231,7 @@ shows why the format should follow the job.
 
 ::: {.recipe}
 
-Choose the right file format for each kind of data — the one rule that ends most format debates.
+Match the file format to the kind of data.
 
 | Job | Format | Why |
 |---|---|---|
@@ -269,9 +262,7 @@ Log lines — the audit (a slice of PLR's `_log_command` output):
 **PLR gives you the audit for free.**
 
 Every operation is already logged through `logging` ([chapter 13](../part3/13_system_design.qmd)).
-A run log — greppable, diffable, gradeable — is three lines of `basicConfig`. It beats a screenshot
-as a deliverable for exactly the reason this chapter exists: it is the machine-readable truth about
-what the run did.
+A run log is three lines of `basicConfig`, and is greppable and diffable.
 
 **See also:** `sort_by_xy_and_chunk_by_x` for the same data in a different shape; the format rule
 is restated at system level in [chapter 13](../part3/13_system_design.qmd).

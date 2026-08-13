@@ -44,16 +44,23 @@ $table-border-color: $border-color !default;
 // face. Sections are one level; anything deeper matches it, so nesting never
 // introduces another size.
 h1, h2, h3, h4, h5, h6,
-.title, .quarto-title-banner .title,
+#title-block-header .title,
 .sidebar-title, .sidebar .menu-text,
 .quarto-secondary-nav-title {
   font-family: $font-family-sans-serif !important;
   letter-spacing: 0;
 }
 
-h1, .title {
+// Page title only. `.title` is also used for listing rows, which must stay
+// body-sized, so this is scoped to the title block.
+h1, #title-block-header .title {
   font-size: 1.5rem;
   font-weight: 600;
+}
+
+.listing-title, .listing-title a, td.title {
+  font-size: 1rem;
+  font-weight: 400;
 }
 
 h2 {
@@ -111,3 +118,10 @@ div.sourceCode {
 // Recipe index table
 #recipe-index table { font-size: 0.92em; }
 #recipe-index code { font-size: 0.85em; }
+
+// Cell output (chatterbox tables) is wide and fixed-width. Scroll it inside
+// its own box rather than wrapping, which breaks the column alignment.
+.cell-output pre {
+  overflow-x: auto;
+  white-space: pre;
+}
