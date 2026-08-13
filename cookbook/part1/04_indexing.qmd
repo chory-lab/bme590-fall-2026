@@ -1,11 +1,6 @@
 ---
 title: "Indexing"
-subtitle: "The full grammar for choosing wells, rows, columns, batches, and quadrants"
 ---
-
-Most of what you do with a plate is *choose a subset of it*: "these eight wells", "this column",
-"every other row". PLR's indexing grammar is deliberately small, and it is worth learning once,
-because every pipetting recipe from here on is built on it.
 
 ## Setup {.unnumbered}
 
@@ -38,8 +33,6 @@ walks a grid, there is probably a built-in for it.
 
 ::: {.recipe}
 
-### The task
-
 Choose a set of wells in one expression. This table is the whole grammar:
 
 | Expression | Selects | Result |
@@ -62,16 +55,11 @@ print("(0,0) ->", plate.get_item((0, 0)).name)      # row A, column 1
 1. A colon is a *range*: every well from the first identifier to the second, in fill order.
 2. A comma-separated list is an explicit set. Note the outer brackets — `plate["A1", "B2"]`.
 
-[**Why it works.** `__getitem__` always returns a list, even for a single well. That is deliberate:
-pipetting calls take a list of resources and a list of volumes, so `plate["A1"]` slots straight into
-`lh.aspirate(...)` without a special case.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `plate[(0, 0)]` is *not* row, column
+::: {.callout-warning title="Gotcha: `plate[(0, 0)]` is *not* row, column"}
 
 A tuple is treated as a sequence of integer indices, so `plate[(0, 0)]` returns **two copies of
 index 0** — a silent bug that duplicates wells. For row, column use `plate.get_item((0, 0))`,
-which returns one well. This asymmetry is confusing and it is worth knowing cold.
+which returns one well.
 :::
 
 **See also:** `plate["A1:E1"]` uses the same colon syntax as Python slices; `get_items(...)`
@@ -85,8 +73,6 @@ accepts the same identifiers.
 
 ::: {.recipe}
 
-### The task
-
 Get one full row or column, or pull wells by index.
 
 ```{python}
@@ -96,17 +82,11 @@ print("row('A') ->", len(plate.row("A")), "wells")   # row() accepts the label t
 print("column(0)->", len(plate.column(0)), "wells:", [w.name.split('well_')[1] for w in plate.column(0)])
 ```
 
-[**Why it works.** `row()` and `column()` are the two axis views of the same grid. They are
-convenience wrappers over `get_item((row, col))` — one call each, no comprehension needed. `row()`
-takes an index *or* a letter; `column()` takes an index.]{.why}
-
-::: {.callout-note}
-## Which to reach for
+**Which to reach for.**
 
 Use `row()`/`column()` when the *shape* of what you want is a line. Use the `#select` grammar when
 it is not. The overlap is fine — `plate.row("A")` and `plate["A1:A12"]` are the same set by
 different names.
-:::
 
 **See also:** `get_items(["A1", "A2"])` returns exactly the listed wells — the non-range form of
 the comma syntax above.
@@ -118,8 +98,6 @@ the comma syntax above.
 ## Walk a plate in batches {#traverse}
 
 ::: {.recipe}
-
-### The task
 
 Hand eight-channel operations a stream of columns, one batch at a time.
 
@@ -135,18 +113,10 @@ for batch in plate.traverse(batch_size=8, start="top_left", direction="right"):
 1. `traverse` is a generator: batches are produced lazily and only when you ask. Iterating the
    whole plate would print all twelve batches.
 
-[**Why it works.** `traverse(batch_size, start, direction, repeat)` walks the plate in fill order
-starting from `start` (`"top_left"`, `"bottom_right"`, ...), handing back fixed-size batches. The
-`"snake_down"` directions alternate rows — go down column 1, up column 2, and so on — which is the
-motion real multi-channel heads like. With `repeat=True` the last (short) batch wraps back to the
-start instead of being short.]{.why}
-
-::: {.callout-warning}
-## Gotcha: the signature is `traverse(batch_size, start, direction)`
+**Gotcha: the signature is `traverse(batch_size, start, direction)`.**
 
 Older docs show `traverse(direction, batch_size)`. In 0.2.2 `batch_size` comes first and **`start`
 is required** — omit it and you get `TypeError: missing 1 required positional argument: 'start'`.
-:::
 
 ::: {.column-margin}
 **Streaming without a loop**
@@ -173,8 +143,6 @@ across channels the same way.
 
 ::: {.recipe}
 
-### The task
-
 You have a 384-well plate and an 8-channel head. Aspirate from the wells that correspond to one
 96-well quadrant of it.
 
@@ -199,18 +167,11 @@ print("bottom-right block:", len(qb), "wells")
 3. `quadrant_type="block"` takes a contiguous corner instead — also 96 wells, but a solid 8×12
    block. You choose by how the source plate was seeded, not by taste.
 
-[**Why it works.** A 96-well pattern occupies a 384-well plate as a 2×2 checkerboard of
-identically-colored positions; `get_quadrant` returns exactly the wells of one color. This is the
-indexing feature that makes a 384 plate usable with 8-channel hardware without hand-writing the
-pattern.]{.why}
-
-::: {.callout-warning}
-## Gotcha: quadrant names are compass points, not numbers
+**Gotcha: quadrant names are compass points, not numbers.**
 
 `get_quadrant` takes `"tl"`, `"tr"`, `"bl"`, `"br"` (or the long forms). `"Q1"` raises
 `ValueError`. The return is a plain list, not a plate — index it like one, but do not expect
 `plate[...]` grammar on it.
-:::
 
 **See also:** `quadrant_internal_fill_order="column-major"` vs `"row-major"` controls the order
 within a quadrant; defaults are sensible for most cases.
@@ -223,8 +184,6 @@ within a quadrant; defaults are sensible for most cases.
 
 ::: {.recipe}
 
-### The task
-
 Turn `"C7"` into `(2, 6)`, or `7` into `"H"` — the plumbing behind every well-ID conversion.
 
 ```{python}
@@ -236,17 +195,10 @@ print("label_to_row_index('C'):", label_to_row_index("C"))  # 2
 print("split_identifier('B12'):", split_identifier("B12"))  # ("B", "12")
 ```
 
-[**Why it works.** Well labels are base-26 letters with a 1-based column number, which is exactly
-the format spreadsheets use and exactly what is annoying to do by hand. The three helpers split
-that work: `split_identifier` separates row letter from column number, and the two `*_to_*`
-functions convert each half.]{.why}
-
-::: {.callout-note}
-## New in 0.2.2
+**New in 0.2.2.**
 
 These are recent additions. If you are porting code from an older PLR, you probably reimplemented
 them by hand — replace that with the real thing.
-:::
 
 **See also:** `split_identifier` is the primitive behind [chapter 7](../part2/07_worklists.qmd)'s
 CSV row validation.
@@ -258,8 +210,6 @@ CSV row validation.
 ## Print an occupancy map {#summary-map}
 
 ::: {.recipe}
-
-### The task
 
 Look at a plate as a grid, marking which wells have liquid.
 
@@ -276,15 +226,10 @@ print(plate.summary(occupied_func=occupied))        # <2>
 
 1. `set_volume` seeds the tracker directly — a way to tell PLR what is in a well without pipetting
    (see [chapter 11](../part2/11_state.qmd)).
-2. `occupied_func` returns **one character per well**; the grid is the payoff. It must return a
+2. `occupied_func` returns **one character per well**. It must return a
    string — returning a bool raises `TypeError`.
 
-[**Why it works.** `summary()` is the same tree-read as [chapter 1](../part1/01_robot_on_screen.qmd#summary)'s
-deck view, at well resolution: a 12×8 grid labeled with row letters. The `occupied_func` hook is
-where you define "occupied" — liquid, tips, whatever your protocol cares about.]{.why}
-
-::: {.callout-warning}
-## Gotcha: the two `summary()` methods are opposites
+::: {.callout-warning title="Gotcha: the two `summary()` methods are opposites"}
 
 `lh.summary()` **prints** the deck map and returns `None`. `plate.summary()` **returns** the grid as
 a string and prints nothing — which is why this recipe wraps it in `print()`. Forget the `print()`

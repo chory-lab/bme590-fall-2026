@@ -1,24 +1,12 @@
 ---
 title: "Getting a robot on screen"
-subtitle: "LiquidHandler, the chatterbox backend, and your first simulated robot"
 ---
-
-PyLabRobot's model is simple and it is worth stating plainly: **a `LiquidHandler` is a frontend that
-takes two things — a `Deck`, which describes the physical layout, and a `Backend`, which moves
-channels around on it.** You tell the frontend what to do ("aspirate 50 µL from A1"), and the
-frontend checks, plans, and then hands the operation to the backend to execute.
-
-This chapter is about the *backend* half of that pair. Real hardware has a backend per machine. But
-PLR ships a backend that needs **no machine at all**, and that is the one everything in this book
-uses until chapter 12.
 
 ---
 
 ## Get a liquid handler running with no hardware {#first-robot}
 
 ::: {.recipe}
-
-### The task
 
 Start a simulated liquid handler, look at what is on it, and shut it down — the whole lifecycle, in
 less than ten lines.
@@ -36,7 +24,7 @@ await lh.stop()                                                                 
 
 1. `LiquidHandler` is the frontend. It lives in `pylabrobot.liquid_handling`.
 2. `LiquidHandlerChatterboxBackend` is the backend that needs no hardware. It *narrates* every
-   operation instead of performing it — the printout is not noise, it is the whole point (below).
+   operation instead of performing it.
 3. `STARLetDeck` is a ready-made Hamilton STARlet deck: the standard eight-channel layout with
    tip racks, a waste, and a trash in the right places. There are a few to choose from; more in
    chapter 3.
@@ -46,15 +34,7 @@ await lh.stop()                                                                 
    until it is called.
 6. `stop()` closes the connection. Your protocol should always end with this.
 
-[**Why it works.** The chatterbox backend is a complete implementation of the `LiquidHandlerBackend`
-interface that does nothing but print. Because it is a *complete* implementation, every check the
-frontend runs still runs — the deck tree is updated, tip state is maintained, and volume tracking
-applies when it is switched on — the only thing missing is motion. That is what makes it a real
-testbed rather than a mock: a protocol that works against chatterbox will genuinely *work*, just
-without moving anything.]{.why}
-
-::: {.callout-warning}
-## Gotcha: volume tracking is off by default
+::: {.callout-warning title="Gotcha: volume tracking is off by default"}
 
 `does_volume_tracking()` returns `False` until you call `set_volume_tracking(True)`. Until then,
 aspirating from a well PLR believes is empty succeeds silently — no `TooLittleLiquidError`, no
@@ -70,8 +50,7 @@ Recipes in this book that seed a well with `set_volume(...)` are establishing wh
 there, so the narration reads correctly and so the recipe still holds once tracking is on.
 :::
 
-::: {.callout-important}
-## The narration is the teaching aid
+**The narration is the teaching aid.**
 
 Run the same protocol against the chatterbox and against a real machine and the frontend produces
 the identical plan — the backend is the only difference. When a recipe in this book shows you its
@@ -80,15 +59,12 @@ have done.** Read it.
 
 Under the hood this works because PLR's frontend owns *tracking and validation*, and the backend
 owns *motion*. Chatterbox executes the first half faithfully and skips the second.
-:::
 
-::: {.callout-note}
-## ~15 machine types ship a chatterbox
+**~15 machine types ship a chatterbox.**
 
 The same trick exists for thermocyclers, incubators, centrifuges, sealers, plate readers, pumps,
 scales, and more — see the [workcell recipe](#workcell). A complete lab can be simulated with zero
 hardware.
-:::
 
 :::
 
@@ -97,8 +73,7 @@ hardware.
 ## Why everything is `await` {.unnumbered}
 
 Every PLR operation that touches a machine is `async def` — `setup`, `aspirate`, `move_plate`,
-`stop`, all of them — so every call needs `await`. This is the single most common day-one blocker,
-so it is worth being explicit about what is going on.
+`stop`, all of them — so every call needs `await`.
 
 PLR is built on `asyncio`. An `async def` function returns a *coroutine*, which does not run until
 the event loop gets to it; `await` hands control to that coroutine and lets it do its work. The
@@ -141,8 +116,6 @@ Jupyter. When you take a recipe into a script, wrap it in `asyncio.run(main())` 
 
 ::: {.recipe}
 
-### The task
-
 Ask PLR what is actually on the deck, and get a flat list you can program against.
 
 ```{python}
@@ -157,17 +130,11 @@ print(len(names), "resources:", names[:8], "...")
 2. `deck.get_all_children()` walks the whole resource tree and returns every node, flat. This is
    the one to program against: count plates, find free positions, locate a named resource.
 
-[**Why it works.** A `Deck` is a resource tree — carriers hold plates, plates hold wells, tip racks
-hold tip spots. `get_all_children()` collapses that tree into one list, which is the data you
-actually want when asking "is everything where I think it is".]{.why}
-
-::: {.callout-warning}
-## Gotcha: `summary()` on a Windows console
+**Gotcha: `summary()` on a Windows console.**
 
 The rail map uses box-drawing characters (├──). On Windows, a terminal using the legacy `cp1252`
 code page raises `UnicodeEncodeError` when printing it. In a notebook or with UTF-8 output it is
 fine; if you hit it in a script, set `PYTHONIOENCODING=utf-8` (or `chcp 65001`) first.
-:::
 
 **See also:** `deck.get_all_children()` in [chapter 3](../part1/03_deck.qmd); the occupancy-map
 variant with a custom predicate in [chapter 4](../part1/04_indexing.qmd#summary-map).
@@ -179,8 +146,6 @@ variant with a custom predicate in [chapter 4](../part1/04_indexing.qmd#summary-
 ## See the deck {#visualizer}
 
 ::: {.recipe}
-
-### The task
 
 Open a live, interactive view of the deck in your browser.
 
@@ -201,17 +166,11 @@ await vis.stop()                                      # <3>
    server on `1337` that serves the page. Open the file-server URL it prints.
 3. `vis.stop()` tears the servers down. Same `setup`/`stop` discipline as everything else.
 
-[**Why it works.** The visualizer renders the resource tree from `Resource.serialize()` — the same
-data PLR uses for save/load — so what you see is the actual model, not a sketch. Every
-`assign_child_resource`, `move_plate`, or `aspirate` updates the tree, and the browser redraws.]{.why}
-
-::: {.callout-note}
-## The one thing that needs a browser
+**The one thing that needs a browser.**
 
 The visualizer is the only recipe in this book that will not work under in-browser execution: it
 needs a websocket and a file server, and in a notebook kernel it serves them fine. Everything else
 here runs headless.
-:::
 
 **See also:** `ws_port` (2121) and `fs_port` (1337) are constructor arguments to `Visualizer`, not
 settings — `pylabrobot.config` configures logging only
@@ -228,8 +187,6 @@ simulate an entire lab — liquid handler, thermocycler, incubator, centrifuge, 
 it exists on a bench.
 
 ::: {.recipe}
-
-### The task
 
 Stand up a thermocycler and an incubator alongside the liquid handler, and run a PCR profile against
 the simulated thermocycler.
@@ -279,20 +236,11 @@ await inc.stop()
 5. Real machine questions have real answers: how many free sites, which plate is where, what
    temperature is it at.
 
-[**Why it works.** Every machine follows the same pattern — frontend object, backend that implements
-a small interface, `setup()`/`stop()` lifecycle. Learn it once on the liquid handler and it applies
-to thermocyclers, incubators, sealers, plate readers, and pumps unchanged. The chatterbox backend
-makes each one instantiable with zero hardware, which is how an entire protocol can be rehearsed
-before the bench exists.]{.why}
-
-::: {.callout-note}
-## What simulation cannot tell you
+**What simulation cannot tell you.**
 
 Chatterbox validates *state* — volumes, tips, positions, temperature calls — not *physics*. It will
 not notice that a 200 µL tip cannot aspirate 250 µL without blowing out, or that a well is not
-where the deck thinks it is. Simulate for logic; verify against hardware. Chapter 13 returns to
-this honestly.
-:::
+where the deck thinks it is. Simulate for logic; verify against hardware.
 
 **See also:** the thermocycler is where [chapter 9](../part2/09_moving_labware.qmd)'s off-deck
 bookkeeping becomes real: you will move a plate to a real or simulated thermocycler and have to tell
@@ -305,8 +253,6 @@ PLR about it.
 ## Shut down cleanly {#setup-stop}
 
 ::: {.recipe}
-
-### The task
 
 Make sure `stop()` always runs, even when the protocol throws halfway through.
 
@@ -328,12 +274,7 @@ async with LiquidHandler(
     pass
 ```
 
-[**Why it works.** `LiquidHandler` implements the async context-manager protocol: entering the
-`async with` calls `await setup()`, exiting it calls `await stop()` — including when the body
-raises. The `try`/`finally` version is exactly what this desugars to, written out.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `setup()` is not optional
+::: {.callout-warning title="Gotcha: `setup()` is not optional"}
 
 PLR enforces it itself. `aspirate`, `dispense`, `pick_up_tips`, and `drop_tips` are wrapped in
 `@need_setup_finished`, which raises if you call them before `setup()`:
@@ -342,8 +283,7 @@ PLR enforces it itself. `aspirate`, `dispense`, `pick_up_tips`, and `drop_tips` 
 RuntimeError: The setup has not finished. See `setup`.
 ```
 
-That decorator is worth reading once — [chapter 13](../part3/13_system_design.qmd) builds a whole
-recovery system out of the same idea.
+[Chapter 13](../part3/13_system_design.qmd) composes recovery policy out of the same idea.
 :::
 
 **See also:** against chatterbox, forgetting `stop()` is harmless. Against real hardware it can

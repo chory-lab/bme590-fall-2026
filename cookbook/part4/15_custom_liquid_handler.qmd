@@ -1,15 +1,6 @@
 ---
 title: "Define a custom liquid handler"
-subtitle: "Fourteen abstract members, six of them real work"
 ---
-
-This chapter builds a working `LiquidHandlerBackend` for a single-channel gantry: a machine with one
-pipetting channel, no 96-head, and no gripper. Every step is given. At the end the backend drives a
-real `LiquidHandler` — tip tracking, volume tracking, and all the frontend checks — and emits
-commands to a device.
-
-The scope is smaller than it looks. `LiquidHandlerBackend` declares 14 abstract members; **six of
-them are the machine**, and the other eight are declarations of what you do not support.
 
 ## Setup {.unnumbered}
 
@@ -36,8 +27,6 @@ from pylabrobot.resources import (
 
 ::: {.recipe}
 
-### The task
-
 Start from a backend that already works.
 
 `pylabrobot/liquid_handling/backends/chatterbox.py` is **242 lines** and is a complete, correct
@@ -48,10 +37,6 @@ Read it before writing anything. The two things to take from it are the shape of
 `async def aspirate(self, ops, use_channels)` — and the fact that a backend receives **lists of
 operation objects**, not the arguments the caller passed to `lh.aspirate`.
 
-[**Why it works.** The frontend resolves resources to positions, checks trackers, and packages each
-channel's work into a dataclass. By the time the backend is called, the decisions are made; the
-backend's job is to turn already-validated operations into device commands.]{.why}
-
 :::
 
 ---
@@ -59,8 +44,6 @@ backend's job is to turn already-validated operations into device commands.]{.wh
 ## Step 2: See what the interface demands {#abstract-members}
 
 ::: {.recipe}
-
-### The task
 
 List what must be implemented, and what happens if it is not.
 
@@ -93,26 +76,19 @@ except TypeError as e:
 
 1. Python refuses to instantiate a class with unimplemented abstract methods.
 
-[**Why it works.** `LiquidHandlerBackend` is an ABC, so the abstract set is a checklist enforced at
-construction. A backend cannot silently omit a capability — it has to say something for each of the
-14, even if what it says is "not supported".]{.why}
-
-::: {.callout-note}
-## `setup` is not abstract, `stop` is
+::: {.callout-note title="`setup` is not abstract, `stop` is"}
 
 `stop` is on the list; `setup` is not. The base class provides a `setup` that asserts a deck has
 been set, so an override should call `await super().setup()` before touching hardware. There is no
 default `stop`.
 :::
 
-::: {.callout-note}
-## Members with defaults you may override
+**Members with defaults you may override.**
 
 Not abstract, and already implemented: `move_channel_x/y/z`,
 `prepare_for_manual_channel_operation`, and `request_tip_presence` all raise `NotImplementedError`
 ([chapter 12](../part2/12_hardware.qmd#jog)), and `get_channel_spacings` returns a generic
 occupancy diameter for every channel. Override the ones your machine can do.
-:::
 
 :::
 
@@ -121,8 +97,6 @@ occupancy diameter for every channel. Override the ones your machine can do.
 ## Step 3: Implement the core six {#core}
 
 ::: {.recipe}
-
-### The task
 
 Write the methods that are the machine.
 
@@ -228,9 +202,6 @@ Each operation carries what the backend needs:
 | `Pickup` / `Drop` | `resource`, `offset`, `tip` |
 | `SingleChannelAspiration` / `SingleChannelDispense` | `resource`, `offset`, `tip`, `volume`, `flow_rate`, `liquid_height`, `blow_out_air_volume`, `mix` |
 
-[**Why it works.** All the operation dataclasses are `frozen=True`, so a backend cannot alter the
-plan it was handed. It reads the fields and emits commands.]{.why}
-
 :::
 
 ---
@@ -238,8 +209,6 @@ plan it was handed. It reads the fields and emits commands.]{.why}
 ## Step 4: Run a protocol through it {#run}
 
 ::: {.recipe}
-
-### The task
 
 Drive the backend with an ordinary `LiquidHandler` and watch the device traffic.
 
@@ -275,10 +244,6 @@ for command in device.sent:
 2. An explicit flow rate reaches the device as `RATE 75.0`.
 3. No flow rate given, so the backend's own default appears instead.
 
-[**Why it works.** Everything in Parts I–III applies unchanged. The frontend tracked volumes and
-tips, resolved `plate["A1"]` to a coordinate, and refused anything invalid before your code ran —
-the backend only had to move and pipette.]{.why}
-
 :::
 
 ---
@@ -286,8 +251,6 @@ the backend only had to move and pipette.]{.why}
 ## Step 5: Declare what you cannot do {#refuse}
 
 ::: {.recipe}
-
-### The task
 
 Understand what a caller sees when they ask for a capability the machine lacks.
 
@@ -307,8 +270,7 @@ except (NotImplementedError, KeyError) as e:
 
 1. The backend raises `NotImplementedError` — but that is not what surfaces.
 
-::: {.callout-warning}
-## Gotcha: the 96-head methods are not reached
+::: {.callout-warning title="Gotcha: the 96-head methods are not reached"}
 
 `LiquidHandler.__init__` builds `head96` only when the backend reports
 `head96_installed`, which defaults to `False`. `pick_up_tips96` indexes that empty dict before
@@ -318,11 +280,6 @@ calling the backend, so the caller gets a bare **`KeyError: 0`** rather than the
 A backend that does have a 96-head sets `self._head96_installed = True` in `__init__`, which is what
 makes the frontend build the head and route the call through.
 :::
-
-[**Why it works.** Two different mechanisms are in play. The ABC forces you to *write* something for
-all 14 members, which is a compile-time-ish guarantee about the class. Whether a call reaches your
-method is a separate, runtime question, decided by the frontend from the capabilities the backend
-advertises.]{.why}
 
 **See also:** `NotImplementedError` with an empty message is what the generic chatterbox raises for
 the jog methods ([chapter 12](../part2/12_hardware.qmd#jog)) — a message costs nothing and is worth
@@ -335,8 +292,6 @@ supplying.
 ## Step 6: Talk to a real device {#io}
 
 ::: {.recipe}
-
-### The task
 
 Replace `FakeGantry` with a transport.
 
@@ -370,12 +325,6 @@ class GantryBackend(LiquidHandlerBackend):
    `parity`, `stopbits`, `timeout`, `rtscts`, `dsrdtr`.
 2. The transport has its own `setup`/`stop`, nested inside the backend's.
 
-[**Why it works.** These wrappers call `capturer.record` on every read and write. That is what makes
-`start_capture` / `validate` work ([chapter 13](../part3/13_system_design.qmd#testing)) — a backend
-built on raw `pyserial` is invisible to capture, and cannot be replay-tested. The wrappers also log
-at `LOG_LEVEL_IO`, so device traffic appears in the run record alongside the frontend's
-calls.]{.why}
-
 :::
 
 ---
@@ -383,8 +332,6 @@ calls.]{.why}
 ## Step 7: Coordinate frames and homing {#coordinates}
 
 ::: {.recipe}
-
-### The task
 
 Get from PLR's coordinates to the machine's.
 
@@ -416,14 +363,12 @@ async def _goto(self, resource, offset: Coordinate):
 
 1. Measured once for the instrument, not derived from anything PLR knows.
 
-::: {.callout-note}
-## A deck of your own
+**A deck of your own.**
 
 A machine with a different layout wants a `Deck` subclass, in the way `STARLetDeck` and `OTDeck`
 differ ([chapter 3](../part1/03_deck.qmd#build-deck)): `STARLetDeck` takes `rails`, `OTDeck` takes
 `assign_child_at_slot(slot=)`. A `Deck` subclass defines its own positioning method and the
 locations it maps to.
-:::
 
 :::
 

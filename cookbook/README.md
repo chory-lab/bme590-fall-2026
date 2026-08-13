@@ -33,69 +33,12 @@ rm -rf _freeze/ && quarto render
 That is the anti-rot mechanism. PLR removes subsystems across minor versions; a cookbook nobody
 executes is wrong within a semester.
 
-## The recipe format
+## Writing
 
-A recipe is the unit of this book. Every one has the same five parts, in this order:
+Style, voice, and the recipe format: [`docs/style_guide.md`](../docs/style_guide.md).
 
-1. **The task** — phrased as the reader would search for it, not as the API is named
-2. **A runnable snippet** — 5–15 lines, executes against `ChatterboxBackend`
-3. **Why it works** — one paragraph, wrapped in `[...]{.why}`
-4. **Gotchas** — `::: {.callout-warning}` per gotcha, each one a real failure mode
-5. **See also** — related recipes and the APIs one level down
-
-Wrap the whole thing in `::: {.recipe}` so it gets the left rule, and give the heading an explicit
-anchor:
-
-```markdown
-## Move a plate onto a magnetic bead stand {#move-plate-to-magnet}
-
-::: {.recipe}
-
-### The task
-...
-:::
-```
-
-`part2/09_moving_labware.qmd` is the reference implementation. Copy its structure.
-
-## Registering a recipe in the index
-
-Recipes live inline in their chapter — they are not separate files — so that they stay in narrative
-context. The task-indexed listing on `recipes.qmd` is driven by an explicit registry, `recipes.yml`:
-
-```yaml
-- title: "Move a plate onto a magnetic bead stand"
-  path: part2/09_moving_labware.qmd#move-plate-to-magnet
-  chapter: 9
-  apis: "lh.move_plate, PlateAdapter, alpaqua_96_plateadapter_magnum_flx"
-```
-
-**Adding a recipe means adding an entry here.** `path` must match the `{#anchor}` on the heading.
-`apis` is free text and exists so the listing's filter box matches on API names — put in everything
-a reader might search for.
-
-## Scope boundary
-
-The cookbook is a **standalone manual**. It contains no exercises, no assignments, no graded
-content, and no course framing. Workshops link *into* it; nothing course-specific links *out of*
-it. Chapters 14–15 are guided builds where every step is given — a reader follows along and ends
-with working code — not exercises with answers withheld.
-
-## House style
-
-- **Second person, present tense.** "Move the lid first", not "the lid should be moved first".
-- **Code annotations over comments** for anything that needs a sentence. Use `# <1>` markers and a
-  numbered list beneath; they render as hover markers.
-- **Margin notes** (`::: {.column-margin}`) for the "Python you need here" asides. Skippable by
-  construction — never put load-bearing information there.
-- **Callouts carry meaning:**
-  - `callout-warning` — a gotcha, a way this bites people
-  - `callout-important` — a conceptual point that changes how you read the rest
-  - `callout-note` — context, adjacent features, scope limits
-- **Tabsets** for the same task on different backends or scales, not for unrelated content.
-- **Every API name verified against 0.2.2 before it is written down.** The library is mid-rename to
-  `<vendor>_<n>_<type>_<volume>uL_<bottom>`; deprecated shims still import and still work, so a
-  wrong name will not necessarily fail the build. Check the source, not your memory.
+Every recipe is registered in `recipes.yml`. `path` must match the `{#anchor}` on the heading;
+`apis` is free text so the listing's filter box matches on API names.
 
 ## Directory layout
 

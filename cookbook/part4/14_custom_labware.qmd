@@ -1,11 +1,6 @@
 ---
 title: "Define custom labware: a PCR plate"
-subtitle: "A complete build, from measurements to a definition you can import"
 ---
-
-This chapter builds one piece of labware from nothing: a 96-well skirted PCR plate with conical
-wells. Every step is given, in order, and the definition at the end works — it goes on a deck, it
-indexes, it converts volume to height, and you can pipette into it.
 
 **0.2.2 ships no PCR plate.** `nest_96_wellplate_100ul_pcr_full_skirt` existed in older PLR and has
 no replacement, so this is a definition worth having rather than an exercise.
@@ -35,8 +30,6 @@ from pylabrobot.resources.height_volume_functions import (
 ## Step 1: Measure the plate {#measure}
 
 ::: {.recipe}
-
-### The task
 
 Know which numbers a definition needs, and from which datum.
 
@@ -69,17 +62,11 @@ print("well depth:", CONE_HEIGHT + CYLINDER_HEIGHT, "mm")
 2. A PCR well is a cone with a short straight section above it. Those two heights are what the
    volume maths needs.
 
-[**Why it works.** A definition is measurements plus the functions that interpret them. Everything
-downstream — where a channel goes, how deep it dips, what "half full" means — is computed from
-these numbers, so a wrong measurement here is a wrong z-coordinate on the bench.]{.why}
-
-::: {.callout-note}
-## `dx`/`dy` are corner offsets
+**`dx`/`dy` are corner offsets.**
 
 `create_ordered_items_2d` places each item by its **lower-left corner**, not its centre. Shipped
 definitions record the arithmetic in a comment, e.g. `dx=10.87,  # 14.3-6.86/2` — the well centre
 minus half the well width.
-:::
 
 :::
 
@@ -88,8 +75,6 @@ minus half the well width.
 ## Step 2: Choose a base class {#base-class}
 
 ::: {.recipe}
-
-### The task
 
 Pick the class to subclass or instantiate. This table is written down nowhere else:
 
@@ -104,12 +89,7 @@ Pick the class to subclass or instantiate. This table is written down nowhere el
 A PCR plate is a grid of wells with a lid, so it is a `Plate`. No subclassing is needed — a factory
 function returning a configured `Plate` is how every shipped definition does it.
 
-[**Why it works.** `Plate` is `Liddable` plus `ItemizedResource["Well"]`. The grid behaviour comes
-from `ItemizedResource`; `has_lid` and lid movement come from `Liddable`. Choosing `Plate` is
-choosing both.]{.why}
-
-::: {.callout-warning}
-## Gotcha: the grid is a contract
+::: {.callout-warning title="Gotcha: the grid is a contract"}
 
 `ItemizedResource` computes its dimensions from the item identifiers, and demands a complete
 rectangle:
@@ -142,8 +122,6 @@ resource builds fine and raises later. With a full grid you get `row`, `column`,
 
 ::: {.recipe}
 
-### The task
-
 Give the well two functions: volume from a liquid height, and height from a volume.
 
 `pylabrobot.resources.height_volume_functions` ships 20 of them. The pair for a round V-bottom well
@@ -169,13 +147,7 @@ for v in (10.0, 50.0, 150.0):
 
 1. A plain wrapper function, **not** `functools.partial` — see below.
 
-[**Why it works.** The relationship is not linear: the same 10 µL fills much more height in the cone
-than in the cylinder above it. The shipped functions integrate the two sections, so
-`compute_height_from_volume(50)` answers "how far down is the surface" correctly for this
-shape.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `functools.partial` does not work here
+::: {.callout-warning title="Gotcha: `functools.partial` does not work here"}
 
 The natural way to bind the fixed dimensions fails:
 
@@ -198,12 +170,10 @@ positional call collides with it. A wrapper function taking one argument avoids 
 is what every shipped definition uses.
 :::
 
-::: {.callout-note}
-## Custom shapes
+**Custom shapes.**
 
 For a geometry none of the 20 functions describe, pass your own callables, or give the well
 `height_volume_data` — a dict of height → volume measured empirically.
-:::
 
 :::
 
@@ -212,8 +182,6 @@ For a geometry none of the 20 functions describe, pass your own callables, or gi
 ## Step 4: Lay out the wells {#layout}
 
 ::: {.recipe}
-
-### The task
 
 Create 96 wells in a grid, each with the geometry from step 3.
 
@@ -249,11 +217,6 @@ print("A1 location:", wells["A1"].location)
 3. `dz` is the height of the well's inside bottom above the plate's own origin.
 4. Everything from here down is forwarded to each `Well.__init__` as `**kwargs`.
 
-[**Why it works.** The helper returns an ordered dict keyed `A1`, `B1`, `C1`, … — column-major,
-matching the fill order PLR indexes by ([chapter 4](../part1/04_indexing.qmd#select)) — and computes
-each item's location from `dx`/`dy` plus the item pitch. Passing that dict as `ordered_items` is
-what makes the plate a full grid.]{.why}
-
 :::
 
 ---
@@ -261,8 +224,6 @@ what makes the plate a full grid.]{.why}
 ## Step 5: Wrap it in a factory function {#factory}
 
 ::: {.recipe}
-
-### The task
 
 Package the definition the way PLR ships definitions: a function taking a name and returning the
 resource.
@@ -312,11 +273,6 @@ print(plate)
    when the deck is serialized, and the one `find_subclass` looks up on load
    ([chapter 11](../part2/11_state.qmd#find-subclass)).
 
-[**Why it works.** A factory function rather than a subclass means the definition is data, not
-behaviour. It also means the docstring is where the catalog number lives, which is what makes
-`__doc__` searchable the way [chapter 2](../part1/02_standard_labware.qmd#find-labware)
-describes.]{.why}
-
 :::
 
 ---
@@ -324,8 +280,6 @@ describes.]{.why}
 ## Step 6: Check it behaves like a plate {#validate}
 
 ::: {.recipe}
-
-### The task
 
 Confirm the definition indexes, tracks, and sits on a deck.
 
@@ -362,17 +316,12 @@ print("liquid height:", round(well.compute_height_from_volume(100), 2), "mm")   
 2. 100 µL of 200 stands 10.21 mm up a 15 mm well — the cone holds less per millimetre than the
    cylinder above it.
 
-[**Why it works.** Nothing in `LiquidHandler` special-cases shipped definitions. A `Plate` with a
-full grid of `Well`s is a plate, wherever the object came from.]{.why}
-
-::: {.callout-note}
-## `ResourceDefinitionIncompleteError` will not tell you what is missing
+**`ResourceDefinitionIncompleteError` will not tell you what is missing.**
 
 The class exists for definitions that are missing data, but **nothing in 0.2.2 raises it**
 ([chapter 10](../part2/10_errors.qmd#dead-errors)). An incomplete definition fails later and
 elsewhere — a missing `max_volume` surfaces as a volume-tracking error, a wrong `dz` as a channel at
 the wrong height. The checks in this step are the validation.
-:::
 
 :::
 
@@ -381,8 +330,6 @@ the wrong height. The checks in this step are the validation.
 ## Step 7: Make it sit at the right height {#height}
 
 ::: {.recipe}
-
-### The task
 
 Put the plate on something that holds it above the deck.
 
@@ -408,12 +355,6 @@ except ValueError as e:
 
 1. Omitting it raises at construction.
 
-[**Why it works.** `pedestal_size_z` is how far the plate's underside sits above or below the
-holder's own z origin. It has no safe default — a plate resting on a pedestal and a plate sunk into
-a recess differ by millimetres, and that difference is the channel's z. `PlateAdapter` computes the
-same thing from geometry for adapters like the magnet in
-[chapter 9](../part2/09_moving_labware.qmd#move-plate-to-magnet).]{.why}
-
 :::
 
 ---
@@ -421,8 +362,6 @@ same thing from geometry for adapters like the magnet in
 ## Step 8: Contribute it upstream {#contribute}
 
 ::: {.recipe}
-
-### The task
 
 Turn a local definition into a shipped one.
 
@@ -444,7 +383,7 @@ Turn a local definition into a shipped one.
 
 ## What geometry can and cannot express
 
-Three different answers, and the boundary is worth stating plainly:
+Three different answers:
 
 - **Geometry is fully extensible.** Sizes, offsets, grids, bottom shapes, and the volume ↔ height
   relationship are all yours to define. Anything with a rectangular grid of containers can be

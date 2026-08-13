@@ -1,13 +1,23 @@
 /*-- scss:defaults --*/
 
-// Type — a book, not an API reference. Generous measure, real serif headings.
+// Two fonts, and only two: one for text, one for code. Headings use the text
+// face at a heavier weight rather than a third family.
 $font-family-sans-serif: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif !default;
 $font-family-monospace:  "JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, monospace !default;
-$headings-font-family:   "Source Serif 4", Georgia, "Times New Roman", serif !default;
+$headings-font-family:   $font-family-sans-serif !default;
 
-$font-size-root:   17px !default;
-$line-height-base: 1.65 !default;
+$font-size-root:   15px !default;
+$line-height-base: 1.6 !default;
 $headings-font-weight: 600 !default;
+
+// Bootstrap's heading scale is display-sized. Bring it down to something
+// closer to body copy so headings read as labels, not banners.
+$h1-font-size: 1.5rem !default;
+$h2-font-size: 1.2rem !default;
+$h3-font-size: 1rem !default;
+$h4-font-size: 1rem !default;
+$h5-font-size: 1rem !default;
+$h6-font-size: 1rem !default;
 
 // Palette — warm paper, ink-blue accent, amber for warnings.
 $body-bg:    #fdfcfa !default;
@@ -22,8 +32,6 @@ $link-color: $primary !default;
 $code-bg:    #f4f2ee !default;
 $code-color: #8a3a2e !default;
 
-// Code blocks sit on a slightly cooler ground than the page so they read as
-// a distinct surface without a heavy border.
 $code-block-bg:     #f7f6f3 !default;
 $code-block-border: #e4e0d8 !default;
 
@@ -32,12 +40,32 @@ $table-border-color: $border-color !default;
 
 /*-- scss:rules --*/
 
-h1, h2, h3 { letter-spacing: -0.01em; }
+// Every heading, including Quarto's title block and sidebar, uses the body
+// face. Sections are one level; anything deeper matches it, so nesting never
+// introduces another size.
+h1, h2, h3, h4, h5, h6,
+.title, .quarto-title-banner .title,
+.sidebar-title, .sidebar .menu-text,
+.quarto-secondary-nav-title {
+  font-family: $font-family-sans-serif !important;
+  letter-spacing: 0;
+}
+
+h1, .title {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
 
 h2 {
-  margin-top: 2.4rem;
-  padding-bottom: 0.35rem;
+  font-size: 1.2rem;
+  margin-top: 2.2rem;
+  padding-bottom: 0.3rem;
   border-bottom: 1px solid $border-color;
+}
+
+h3, h4, h5, h6 {
+  font-size: 1rem;
+  margin-top: 1.5rem;
 }
 
 // Recipes are the unit of the book — give them a visible frame.
@@ -47,13 +75,7 @@ h2 {
   margin: 2rem 0;
 }
 
-.recipe > h3:first-child { margin-top: 0; }
-
-// The "why it works" prose after a snippet, set slightly quieter.
-.why {
-  color: $secondary;
-  font-size: 0.95em;
-}
+.recipe > :first-child { margin-top: 0; }
 
 // Inline code should not shout inside body text.
 code:not(.sourceCode) {
@@ -68,15 +90,17 @@ div.sourceCode {
   border-radius: 5px;
 }
 
-// Callouts: flatter and quieter than Bootstrap's default.
+// Callouts: flatter and quieter than Bootstrap's default. Their titles are set
+// as an attribute, so they are not headings and do not enter the outline.
 .callout {
   border-radius: 5px;
   border-width: 1px;
 }
 
 .callout.callout-style-default > .callout-header { background: transparent; }
+.callout .callout-title-container { font-weight: 600; }
 
-// Margin content — the "Python you need here" sidebars.
+// Margin content — the language asides.
 .column-margin {
   font-size: 0.86em;
   color: $secondary;

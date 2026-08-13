@@ -1,6 +1,5 @@
 ---
 title: "When it complains"
-subtitle: "Portable errors, partial failures, and the tracking escape hatches"
 ---
 
 PLR raises errors from two places.
@@ -11,8 +10,6 @@ called. They are *portable*: the same mistake raises the same class on every bac
 **Backend errors** come from the machine and are vendor-specific — `STARFirmwareError`,
 `TecanError`, `VantageFirmwareError`. Of the 137 exception classes in 0.2.2, about 60 belong to the
 STAR backend.
-
-This chapter covers the portable set.
 
 ## Setup {.unnumbered}
 
@@ -49,8 +46,6 @@ set_volume_tracking(True)          # <1>
 ## The portable errors {#portable-errors}
 
 ::: {.recipe}
-
-### The task
 
 Look up which error a given mistake raises, and what kind of error it is.
 
@@ -112,18 +107,12 @@ except NoLocationError as e:
 
 1. Constructed but never assigned, so it has no position in the tree.
 
-[**Why it works.** Both errors are raised from the resource tree, which is Python state — no backend
-is consulted. An `except TooLittleLiquidError` written against the chatterbox behaves the same on a
-STAR, because the frontend raises before the backend is reached.]{.why}
-
-::: {.callout-note}
-## Backend errors
+**Backend errors.**
 
 Everything not in the table is vendor-specific: `STARModuleError` and its ~60 subclasses,
 `TecanError`, `CytomatBusyError`, and the Liconic and Molecular Devices families. Catch these by
 base class (`except STARFirmwareError`), not by leaf.
 [Chapter 12](../part2/12_hardware.qmd) covers backend error families.
-:::
 
 **See also:** `ResourceNotFoundError` is the failure mode of `get_resource` in
 [chapter 2](../part1/02_standard_labware.qmd#get-resource); `ChannelsDoNotFitError` is the
@@ -136,8 +125,6 @@ no-go-zone case in [chapter 5](../part1/05_pipetting.qmd#channel-spacing).
 ## Continue a worklist past a bad row {#catch-recoverable}
 
 ::: {.recipe}
-
-### The task
 
 Run a list of transfers where some rows fail, and complete the rest.
 
@@ -175,12 +162,7 @@ for row in failed:
    attempted.
 5. Catching the two volume errors specifically leaves other exceptions to propagate.
 
-[**Why it works.** Both errors are raised by the volume tracker during planning, before the backend
-is called, so a caught error means nothing moved: the tip is still on the channel and the deck is
-unchanged. This holds for frontend errors only — a backend error can be raised mid-motion.]{.why}
-
-::: {.callout-warning}
-## Gotcha: a tip holding liquid cannot be dropped
+**Gotcha: a tip holding liquid cannot be dropped.**
 
 If an aspirate succeeds and its dispense fails, the tip keeps the liquid, and `drop_tips` raises:
 
@@ -190,7 +172,6 @@ RuntimeError: Cannot drop tip with volume 50.0
 
 This is a bare `RuntimeError`, not one of the portable classes, so `except TooLittleVolumeError`
 does not catch it. Dispense to waste before dropping, or handle the drop separately.
-:::
 
 ::: {.column-margin}
 **Python you need here**
@@ -209,8 +190,6 @@ does not catch it. Dispense to waste before dropping, or handle the drop separat
 ## Read a partial multichannel failure {#partial-failure}
 
 ::: {.recipe}
-
-### The task
 
 Determine which channels failed and which succeeded after a multichannel operation raises.
 
@@ -240,29 +219,12 @@ for channel, cause in sorted(error.errors.items()):
 3. `ChannelizedError` implements `__len__`.
 4. Each value is that channel's individual error.
 
-[**Why it works.** `aspirate` uses the error to decide which trackers to commit:
-
-```python
-successes = [error is None] * len(aspirations)
-if error is not None and isinstance(error, ChannelizedError):
-    successes = [channel_idx not in error.errors for channel_idx in use_channels]
-
-for channel, op, success in zip(use_channels, aspirations, successes):
-    (op.resource.tracker.commit if success else op.resource.tracker.rollback)()
-```
-
-Tracker updates stay pending until the backend returns. A `ChannelizedError` commits the channels
-not listed in `errors` and rolls back the rest; any other exception rolls back all of them. After
-catching one, PLR's model already reflects what happened.]{.why}
-
-::: {.callout-warning}
-## Gotcha: only the STAR backend raises this
+**Gotcha: only the STAR backend raises this.**
 
 In 0.2.2, `ChannelizedError` is constructed in one place —
 `liquid_handling/backends/hamilton/STAR_backend.py`. The chatterbox never produces one, so a
 partial-failure handler cannot be exercised in simulation. The frontend logic that consumes it is
 backend-agnostic.
-:::
 
 **See also:** `lh.probe_tip_presence_via_pickup()` catches `ChannelizedError`, marks the failed
 channels' spots as empty, and re-raises if a channel it did not ask about appears in `errors`.
@@ -274,8 +236,6 @@ channels' spots as empty, and re-raises if a channel it did not ask about appear
 ## Suppress tracking for a block {#no-tracking}
 
 ::: {.recipe}
-
-### The task
 
 Aspirate from a well whose contents PLR does not know about, without disabling tracking for the
 rest of the run.
@@ -297,11 +257,7 @@ print("after: ", does_volume_tracking())          # <3>
 2. D1 was never filled. With tracking on this raises `TooLittleLiquidError`.
 3. Restored when the block exits normally — but see the gotcha below.
 
-[**Why it works.** The trackers read one module-level flag. `no_volume_tracking()` saves the flag,
-clears it, yields, then restores it. `no_tip_tracking()` does the same for the tip trackers.]{.why}
-
-::: {.callout-warning}
-## Gotcha: an exception inside the block leaves tracking off
+::: {.callout-warning title="Gotcha: an exception inside the block leaves tracking off"}
 
 Neither context manager wraps its `yield` in `try`/`finally`:
 
@@ -346,18 +302,15 @@ finally:
 ```
 :::
 
-::: {.callout-note}
-## What the tracker knows
+**What the tracker knows.**
 
 A container's tracked volume is only what PLR was told — by `set_volume()`, or by an aspirate or
 dispense it performed. Liquid that arrived any other way is not in the model: a trough filled by
 hand before the run, a plate returned from a machine PLR does not model, or a well whose starting
 volume was never seeded. In each case the tracked volume is 0 and an aspirate raises
 `TooLittleLiquidError` while the well is physically full.
-:::
 
-::: {.callout-warning}
-## Gotcha: `no_tip_tracking()` does not suppress every `HasTipError`
+::: {.callout-warning title="Gotcha: `no_tip_tracking()` does not suppress every `HasTipError`"}
 
 There are two, and only one is suppressible:
 
@@ -382,8 +335,6 @@ chapter's setup does; the `no_*` context managers scope the suppression instead.
 
 ::: {.recipe}
 
-### The task
-
 Know that the class imports and can never fire, so it is not used as a check.
 
 ```{python}
@@ -400,16 +351,10 @@ with warnings.catch_warnings(record=True) as caught:      # <1>
 1. Constructing one emits a `DeprecationWarning` from its `__init__`. Nothing in the package raises
    it.
 
-[**Why it works.** Liquid identity tracking was removed before 0.2.2. The class remains so existing
-`except CrossContaminationError` clauses still import, but nothing raises it. Cross-contamination
-guarantees in 0.2.2 come from your own tip-handling policy.]{.why}
-
-::: {.callout-note}
-## Related removals
+**Related removals.**
 
 `set_cross_contamination_tracking()` and `tracker.liquid_history` are gone entirely in 0.2.2. Code
 from older PLR that calls them raises `ImportError` or `AttributeError` at the import line.
-:::
 
 :::
 

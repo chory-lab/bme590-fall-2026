@@ -1,12 +1,6 @@
 ---
 title: "Putting things on the deck"
-subtitle: "Carriers, rails and slots, positions, collisions, rotation"
 ---
-
-A deck is empty until you put things on it, and the way you put things on it is **carriers** —
-the labware that holds labware. Plates sit in plate carriers, tips sit in tip carriers, and the
-carrier itself sits on the deck. This chapter is the mechanics of that hierarchy: how to assign
-things, where "here" actually means, and how to ask whether a spot is free before you use it.
 
 ## Setup {.unnumbered}
 
@@ -49,8 +43,6 @@ created once and shared by every call.
 
 ::: {.recipe}
 
-### The task
-
 Put a plate on a Hamilton deck, and the same plate on an OT-2 deck, using each deck's native
 positioning.
 
@@ -77,13 +69,7 @@ ot_deck.assign_child_at_slot(
 1. The OT-2 has no rails. `OTDeck` is a grid of twelve numbered slots, and `assign_child_at_slot`
    is its equivalent of `rails=`.
 
-[**Why it works.** A carrier is a `Resource` whose children are `ResourceHolder`s — the physical
-positions — and each holder has a well-defined location on the deck. Assigning a plate to a holder
-gives PLR both the geometry and the parent link in one step, which is why `move_plate` in chapter 9
-can work on the tree alone.]{.why}
-
-::: {.callout-warning}
-## Gotcha: assign plates to the carrier, not the deck
+::: {.callout-warning title="Gotcha: assign plates to the carrier, not the deck"}
 
 `lh.deck.assign_child_resource(plate, ...)` technically works, but the plate ends up a direct
 child of the deck with no holder — no site tracking, and `move_plate` to a carrier position gets
@@ -101,8 +87,6 @@ plate sits and is [required in 0.2.2](../part4/14_custom_labware.qmd) — omit i
 
 ::: {.recipe}
 
-### The task
-
 Figure out where a resource is without misreading the coordinates.
 
 ```{python}
@@ -116,13 +100,7 @@ print("plate absolute:                          ", plate.get_absolute_location()
 2. `get_absolute_location()` walks the tree and returns the deck coordinate: `(306.5, 71.5, 183.1)`.
    This is the number that matters for collision checks and for reasoning about the physical deck.
 
-[**Why it works.** Every resource stores its position relative to its parent, so the tree stays
-coherent when a parent moves. `get_absolute_location()` composes those relative offsets up to the
-root. Parent-relative storage is the right internal model; absolute coordinates are the right thing
-to *read* — and confusing the two is the classic bug.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `.location` and `get_absolute_location()` are different numbers
+::: {.callout-warning title="Gotcha: `.location` and `get_absolute_location()` are different numbers"}
 
 A plate on a deck rarely has a `.location` you would recognize as a deck position. If a coordinate
 ever looks wrong, ask which of the two you are reading. `z="t"` in `get_absolute_location(z="t")`
@@ -139,8 +117,6 @@ positions *inside* a well, the next level down.
 ## Will it fit {#collisions}
 
 ::: {.recipe}
-
-### The task
 
 Ask PLR whether a resource can be placed somewhere **before** committing to it.
 
@@ -166,20 +142,13 @@ print("highest known point on deck:", lh.deck.get_highest_known_point())   # <4>
 4. `get_highest_known_point()` returns the highest z over the whole deck — the number to check
    before a gripper traverses with something tall, or before stacking.
 
-[**Why it works.** Placement rules live in the assignment path, and 0.2.2 exposes them separately
-from the assignment so you can ask before you act. The same checks run when you *do* assign —
-`assign_child_resource` raises `ValueError: Location Coordinate(...) is already occupied by
-resource '...'` if two carriers would collide.]{.why}
-
-::: {.callout-note}
-## The two kinds of "no"
+**The two kinds of 'no'.**
 
 - `check_can_drop_resource_here` answers *placement*: does this fit, is this spot free.
 - Name conflicts answer *identity*: is a resource with this name already on the deck
   ([chapter 2](../part1/02_standard_labware.qmd#get-resource)).
 
 Different questions, both raise `ValueError`, both worth catching separately.
-:::
 
 **See also:** `ignore_collision=True` on `assign_child_resource` when you *know* better — a rare
 escape hatch, not a habit.
@@ -191,8 +160,6 @@ escape hatch, not a habit.
 ## Rotate a plate {#rotation}
 
 ::: {.recipe}
-
-### The task
 
 Place a plate in portrait, not landscape.
 
@@ -225,17 +192,10 @@ print("rotated plate sits at:", rotated.get_absolute_location())
    coordinate: it is site 2's position, and it differs from `plate`'s mostly because it is a
    different site.
 
-[**Why it works.** Rotation is stored as an angle on the resource and applied when locations are
-computed, rather than by redefining the geometry. You say *what* the object is once, in its factory
-function, and *which way it faces* separately — which is also why [chapter 9](../part2/09_moving_labware.qmd)
-grips plates with a `GripDirection` rather than a rotation table.]{.why}
-
-::: {.callout-warning}
-## Gotcha: rotation is not mutation
+**Gotcha: rotation is not mutation.**
 
 `plate.rotated(z=90)` does not change `plate`; if you forget to keep the return value, nothing has
 rotated. Prefer `rotated = plate.rotated(z=90)` and assign `rotated` to the carrier, not `plate`.
-:::
 
 **See also:** `Rotation` composes for grippers and stacks; the well-level consequence of a rotated
 plate is that indexing ([chapter 4](../part1/04_indexing.qmd)) runs along the plate's own axes.

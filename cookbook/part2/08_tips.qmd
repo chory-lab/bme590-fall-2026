@@ -1,11 +1,6 @@
 ---
 title: "Tips"
-subtitle: "Drop, return, discard, streaming across racks, and what the rack model knows"
 ---
-
-Picking up a tip is one call. Everything interesting about tips is what happens afterwards: which
-of three places it goes back to, whether the rack model still matches the rack, and what happens
-when the rack runs out mid-protocol.
 
 ## Setup {.unnumbered}
 
@@ -52,8 +47,6 @@ logging.getLogger("pylabrobot.resources").setLevel(logging.WARNING)   # <3>
 
 ::: {.recipe}
 
-### The task
-
 Put a used tip somewhere. There are three calls, and they differ in destination.
 
 ```{python}
@@ -84,12 +77,7 @@ print("A2 after moving to A2:", rack_a.get_item("A2").has_tip())
 | `return_tips()` | the spot each tip came from | `False` |
 | `discard_tips()` | the deck's trash | **`True`** |
 
-[**Why it works.** All three route through the same drop operation; they differ in how the
-destination is computed. `return_tips` reads the origin the tip tracker recorded at pick-up,
-`discard_tips` looks up `deck.get_trash_area()`, and `drop_tips` uses the spots you hand it.]{.why}
-
-::: {.callout-warning}
-## Gotcha: the destination spot must be empty
+**Gotcha: the destination spot must be empty.**
 
 With tip tracking on, dropping into a spot that already holds a tip raises from the spot's tracker:
 
@@ -101,10 +89,8 @@ A rack starts full, so `drop_tips(rack["B3"])` fails on a fresh rack — the des
 spot something was taken from, or one marked empty via
 [`set_tip_state`](#rack-state). This is the tip-spot `HasTipError`, the suppressible one of the two
 in [chapter 10](../part2/10_errors.qmd#no-tracking).
-:::
 
-::: {.callout-warning}
-## Gotcha: the `allow_nonzero_volume` default is not the same across the three
+::: {.callout-warning title="Gotcha: the `allow_nonzero_volume` default is not the same across the three"}
 
 `drop_tips` and `return_tips` default to `False` and raise if the tip still holds liquid:
 
@@ -129,8 +115,6 @@ loaded; `*96` variants (`return_tips96`, `discard_tips96`) work the same way for
 
 ::: {.recipe}
 
-### The task
-
 Pick up tips, use them, and put them away — without writing the put-away call.
 
 ```{python}
@@ -150,10 +134,6 @@ print("B rack A2 has_tip:", rack_b.get_item("A2").has_tip())   # <3>
 2. The default is `discard=True`, so the tip went to the trash and the spot is empty.
 3. `discard=False` returns the tips to their origin spots instead, so the spot is full again.
 
-[**Why it works.** Entering the context calls `pick_up_tips`; leaving it calls `discard_tips` or
-`return_tips` depending on the `discard` flag. `get_mounted_tips()` reports what is on the head as a
-list with one entry per channel, `None` where a channel is empty.]{.why}
-
 ::: {.column-margin}
 **Python you need here**
 
@@ -169,8 +149,6 @@ support the asynchronous context manager protocol` (or its synchronous counterpa
 ## Stream tips across several racks {#stream-tips}
 
 ::: {.recipe}
-
-### The task
 
 Run a protocol that needs more tips than one rack holds, without tracking rack boundaries by hand.
 
@@ -208,14 +186,7 @@ for spot in crossing:
 
 1. `set_index` jumps to a position — here, near the end of the first 96-spot rack.
 
-[**Why it works.** The generator holds a flat list and an integer index. A rack boundary is just the
-point where consecutive entries have different parents, so nothing special happens there. The
-`cache_file_path` makes the index survive the process: it is written on every `__anext__` and again
-at interpreter exit via `atexit`, so a rerun resumes at the next unused tip instead of starting from
-A1.]{.why}
-
-::: {.callout-warning}
-## Gotcha: exhaustion is `StopAsyncIteration`, not a PLR error
+**Gotcha: exhaustion is `StopAsyncIteration`, not a PLR error.**
 
 With `repeat=False` (the default), asking for a spot past the end raises `StopAsyncIteration` —
 Python's iterator protocol, not one of the portable errors from
@@ -224,15 +195,12 @@ a bare `await gen.__anext__()` propagates it. `get(n)` asserts against `get_num_
 so it raises `AssertionError` instead.
 
 `repeat=True` cycles back to the first spot, and makes `get_num_tips_left()` raise `RuntimeError`.
-:::
 
-::: {.callout-note}
-## The randomized variant
+**The randomized variant.**
 
 `F.randomized_tip_spot_generator(tip_spots, K, cache_file_path=...)` picks spots at random while
 refusing any used in the last `K` samples. It has the same `get(n)` interface and the same disk
 cache, and raises `RuntimeError` when every spot is in the recent window.
-:::
 
 **See also:** `traverse` in [chapter 4](../part1/04_indexing.qmd#traverse) does the same batching
 over a plate's wells; the batching helpers in
@@ -245,8 +213,6 @@ over a plate's wells; the batching helpers in
 ## Set what the rack model believes {#rack-state}
 
 ::: {.recipe}
-
-### The task
 
 Tell PLR which spots hold tips — after loading a partly used rack, or after someone took tips by
 hand.
@@ -269,17 +235,10 @@ print("after fill(), C1:", rack_c.get_item("C1").has_tip())
 2. `set_tip_state` takes a dict of identifier → bool, or a flat list of 96 bools.
 3. `fill()` marks every spot as holding a tip.
 
-[**Why it works.** Each `TipSpot` owns a tip tracker holding one boolean. These three methods write
-those booleans directly, without moving anything — the same "tell PLR what is true" operation as
-`unassign()`/`assign_child_resource()` for plates in
-[chapter 9](../part2/09_moving_labware.qmd#off-deck-moves), and `set_volume()` for liquid.]{.why}
-
-::: {.callout-note}
-## Turning the rack's trackers off entirely
+**Turning the rack's trackers off entirely.**
 
 `rack.disable_tip_trackers()` and `rack.enable_tip_trackers()` switch tracking for one rack rather
 than globally. A rack with disabled trackers accepts pick-ups from empty spots without raising.
-:::
 
 **See also:** `no_tip_tracking()` and the two distinct `HasTipError`s in
 [chapter 10](../part2/10_errors.qmd#no-tracking).
@@ -291,8 +250,6 @@ than globally. A rack with disabled trackers accepts pick-ups from empty spots w
 ## Probe and consolidate tip inventory {#probe-consolidate}
 
 ::: {.recipe}
-
-### The task
 
 Ask the machine which spots actually hold tips, and pack partly used racks into fewer full ones.
 
@@ -313,13 +270,7 @@ await lh.consolidate_tip_inventory([rack_a, rack_b, rack_c])   # <1>
 1. Moves tips between partly filled racks so that as few racks as possible hold tips, grouped by
    tip model. Uses the first eight channels unless `use_channels` says otherwise.
 
-[**Why it works.** `probe_tip_inventory` batches the spots across channels, calls the probing
-function on each batch, and assembles the results into one dict. The probing function distinguishes
-present from absent by catching `ChannelizedError` and reading which channel indices are in
-`errors` ([chapter 10](../part2/10_errors.qmd#partial-failure)).]{.why}
-
-::: {.callout-warning}
-## Gotcha: probing cannot find discrepancies on the chatterbox
+::: {.callout-warning title="Gotcha: probing cannot find discrepancies on the chatterbox"}
 
 The probe reports presence by attempting a pick-up, and a simulated pick-up always succeeds, so
 every spot the model already believes is full comes back `True`.

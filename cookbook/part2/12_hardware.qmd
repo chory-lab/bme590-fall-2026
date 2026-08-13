@@ -1,14 +1,6 @@
 ---
 title: "Backend kwargs and real hardware"
-subtitle: "Vendor options, strictness, jogging a channel, and reading a firmware error"
 ---
-
-Everything so far has run against `LiquidHandlerChatterboxBackend`. This chapter is about the
-seam between that and a real machine: how vendor-specific options reach a backend, why the
-chatterbox accepts arguments a STAR rejects, and what a firmware error looks like when it arrives.
-
-Most of it is demonstrable without hardware, because PLR ships a **Hamilton-specific chatterbox**
-that carries the STAR's real method signatures.
 
 ## Setup {.unnumbered}
 
@@ -57,8 +49,6 @@ await star.pick_up_tips(star_rack["A1"])
 
 ::: {.recipe}
 
-### The task
-
 Use a Hamilton-only aspiration parameter from an otherwise ordinary `lh.aspirate` call.
 
 ```{python}
@@ -86,11 +76,6 @@ print(len(params), "vendor parameters")
 print(params[:8])
 ```
 
-[**Why it works.** `LiquidHandler.aspirate` accepts `**backend_kwargs` and passes them through to
-the backend's `aspirate` after checking them against that backend's signature. The frontend
-parameters (`vols`, `flow_rates`, `offsets`) are the portable ones; anything the frontend does not
-recognise is the backend's business.]{.why}
-
 **See also:** the portable arguments this sits alongside are in
 [chapter 5](../part1/05_pipetting.qmd#flow-height).
 
@@ -101,8 +86,6 @@ recognise is the backend's business.]{.why}
 ## Why the chatterbox accepts anything {#kwargs-validation}
 
 ::: {.recipe}
-
-### The task
 
 Understand why a misspelled kwarg is caught on one backend and silently ignored on another.
 
@@ -153,8 +136,7 @@ set_strictness(Strictness.WARN)                         # <4>
 | `WARN` (default) | `UserWarning`, dropped |
 | `STRICT` | `TypeError` |
 
-::: {.callout-warning}
-## Gotcha: `STRICT` does nothing on the chatterbox
+::: {.callout-warning title="Gotcha: `STRICT` does nothing on the chatterbox"}
 
 The generic chatterbox declares `**backend_kwargs` on every operation, so `_check_args` returns
 before the strictness branch is ever reached. Setting `Strictness.STRICT` and passing
@@ -177,8 +159,7 @@ set_strictness(Strictness.WARN)
 A typo in a vendor kwarg therefore survives every simulated run and is discovered on the machine.
 :::
 
-::: {.callout-note}
-## Missing arguments raise at any strictness
+**Missing arguments raise at any strictness.**
 
 Strictness governs *extra* arguments only. An argument the backend requires and did not receive
 raises before strictness is consulted:
@@ -186,7 +167,6 @@ raises before strictness is consulted:
 ```text
 TypeError: Missing arguments to backend.aspirate: {...}
 ```
-:::
 
 **See also:** `_check_args` returns the set of extras to remove, which is why a `WARN`-level extra
 never reaches the backend.
@@ -198,8 +178,6 @@ never reaches the backend.
 ## Run the protocol against a STAR without a STAR {#star-chatterbox}
 
 ::: {.recipe}
-
-### The task
 
 Validate a Hamilton protocol — signatures, tip types, vendor kwargs — with no machine attached.
 
@@ -228,20 +206,13 @@ except RuntimeError as e:
 
 1. The same rack the chatterbox recipes throughout this book pick up from without complaint.
 
-[**Why it works.** The chatterbox pattern is a backend that implements the interface and prints
-instead of moving. `LiquidHandlerChatterboxBackend` implements the *abstract* interface, so it
-accepts whatever the abstract interface accepts. `STARChatterboxBackend` implements the *STAR*
-interface, so what it accepts is what a STAR accepts.]{.why}
-
-::: {.callout-note}
-## Import path
+**Import path.**
 
 `STARChatterboxBackend` is not re-exported from `pylabrobot.liquid_handling.backends`. Import it
 from `pylabrobot.liquid_handling.backends.hamilton.STAR_chatterbox`. Its constructor takes the
 machine's configuration — `num_channels`, `core96_head_installed`, `iswap_installed`, and the
 `MachineConfiguration` / `ExtendedConfiguration` dataclasses — which is how you model a specific
 instrument rather than a generic one.
-:::
 
 **See also:** `opentrons_chatterbox.py` provides the same thing for the OT-2.
 
@@ -252,8 +223,6 @@ instrument rather than a generic one.
 ## Jog a channel by hand {#jog}
 
 ::: {.recipe}
-
-### The task
 
 Move one channel to a coordinate, outside any pipetting operation — for teaching positions or
 recovering from a crash.
@@ -269,12 +238,7 @@ await star.move_channel_z(channel=0, z=150.0)
 1. Puts the machine into a state where a single channel can be driven directly. Required first.
 2. One axis per call, in millimetres, absolute.
 
-[**Why it works.** These four are `LiquidHandler` methods that delegate straight to the backend
-with no tracking or planning in between — there is no resource, no volume, and nothing to
-commit.]{.why}
-
-::: {.callout-warning}
-## Gotcha: not implemented on the generic chatterbox
+::: {.callout-warning title="Gotcha: not implemented on the generic chatterbox"}
 
 All four raise `NotImplementedError` with an empty message on
 `LiquidHandlerChatterboxBackend`:
@@ -297,8 +261,6 @@ except NotImplementedError as e:
 ## Read a backend error family {#error-families}
 
 ::: {.recipe}
-
-### The task
 
 Take apart a Hamilton firmware error and find out which module failed and why.
 
@@ -336,18 +298,11 @@ print("is a STARModuleError:", isinstance(module_error, STARModuleError))
 3. Same consumption pattern as `ChannelizedError`
    ([chapter 10](../part2/10_errors.qmd#partial-failure)): iterate the dict, read each cause.
 
-[**Why it works.** A STAR reports faults per module in one firmware response. PLR parses that string
-into one `STARModuleError` subclass per module — there are about 60, one per documented fault — and
-wraps them in a single `STARFirmwareError` carrying the raw response alongside. `STARModuleError` is
-the common base, so `except STARModuleError` catches any of them.]{.why}
-
-::: {.callout-note}
-## The shape repeats across vendors
+**The shape repeats across vendors.**
 
 `TecanError`, `VantageFirmwareError`, the Cytomat and Liconic families, and the Molecular Devices
 errors follow the same layout: one base class per vendor, leaf classes per documented fault. Catch
 the base; read the leaf.
-:::
 
 **See also:** the portable errors that raise identically on every backend are in
 [chapter 10](../part2/10_errors.qmd#portable-errors).

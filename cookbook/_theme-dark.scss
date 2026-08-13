@@ -1,14 +1,21 @@
 /*-- scss:defaults --*/
 
-// Mirrors _theme-light.scss. Same type scale and structure; only the palette
-// is redefined, so the two themes stay in step.
+// Mirrors _theme-light.scss. Same two fonts and same type scale; only the
+// palette is redefined, so the two themes stay in step.
 $font-family-sans-serif: "Source Sans 3", "Segoe UI", system-ui, -apple-system, sans-serif !default;
 $font-family-monospace:  "JetBrains Mono", "Cascadia Code", "SF Mono", Menlo, monospace !default;
-$headings-font-family:   "Source Serif 4", Georgia, "Times New Roman", serif !default;
+$headings-font-family:   $font-family-sans-serif !default;
 
-$font-size-root:   17px !default;
-$line-height-base: 1.65 !default;
+$font-size-root:   15px !default;
+$line-height-base: 1.6 !default;
 $headings-font-weight: 600 !default;
+
+$h1-font-size: 1.5rem !default;
+$h2-font-size: 1.2rem !default;
+$h3-font-size: 1rem !default;
+$h4-font-size: 1rem !default;
+$h5-font-size: 1rem !default;
+$h6-font-size: 1rem !default;
 
 // Palette — soft charcoal rather than black; desaturated accents so syntax
 // highlighting stays the brightest thing on the page.
@@ -32,12 +39,32 @@ $table-border-color: $border-color !default;
 
 /*-- scss:rules --*/
 
-h1, h2, h3 { letter-spacing: -0.01em; }
+// Every heading, including Quarto's title block and sidebar, uses the body
+// face. Sections are one level; anything deeper matches it, so nesting never
+// introduces another size.
+h1, h2, h3, h4, h5, h6,
+.title, .quarto-title-banner .title,
+.sidebar-title, .sidebar .menu-text,
+.quarto-secondary-nav-title {
+  font-family: $font-family-sans-serif !important;
+  letter-spacing: 0;
+}
+
+h1, .title {
+  font-size: 1.5rem;
+  font-weight: 600;
+}
 
 h2 {
-  margin-top: 2.4rem;
-  padding-bottom: 0.35rem;
+  font-size: 1.2rem;
+  margin-top: 2.2rem;
+  padding-bottom: 0.3rem;
   border-bottom: 1px solid $border-color;
+}
+
+h3, h4, h5, h6 {
+  font-size: 1rem;
+  margin-top: 1.5rem;
 }
 
 .recipe {
@@ -46,12 +73,7 @@ h2 {
   margin: 2rem 0;
 }
 
-.recipe > h3:first-child { margin-top: 0; }
-
-.why {
-  color: $secondary;
-  font-size: 0.95em;
-}
+.recipe > :first-child { margin-top: 0; }
 
 code:not(.sourceCode) {
   background: $code-bg;
@@ -71,6 +93,7 @@ div.sourceCode {
 }
 
 .callout.callout-style-default > .callout-header { background: transparent; }
+.callout .callout-title-container { font-weight: 600; }
 
 .column-margin {
   font-size: 0.86em;

@@ -1,6 +1,5 @@
 ---
 title: "Saving and loading"
-subtitle: "Layout and contents are two files, and only one of them is the deck"
 ---
 
 PLR serializes two different things, through two different pairs of calls.
@@ -57,8 +56,6 @@ scratch = pathlib.Path(tempfile.mkdtemp(prefix="cookbook_state_"))
 
 ::: {.recipe}
 
-### The task
-
 Write the deck to a file, and rebuild it later without re-running the assignment code.
 
 ```{python}
@@ -90,17 +87,10 @@ Loading re-runs `assign_child_resource` for every resource in the file, so any w
 emits at assignment time is emitted again — here, the tall-tip-rack traverse warning that the setup
 cell already produced once.
 
-[**Why it works.** `serialize()` walks the tree and writes each resource as a dict of its
-constructor arguments plus a `type` and a `location`, with children nested underneath.
-`deserialize()` reverses it: look up the class named by `type`, call it with the saved arguments,
-then recurse into `children` and re-assign each one at its saved location.]{.why}
-
-::: {.callout-note}
-## The file is large
+**The file is large.**
 
 A STARlet deck with one plate and one tip rack serializes to roughly 300 KB, because every well and
 every tip spot is a resource with its own entry. This is a description of the deck, not a diff.
-:::
 
 **See also:** the visualizer in
 [chapter 1](../part1/01_robot_on_screen.qmd#visualizer) renders from this same `serialize()` output.
@@ -112,8 +102,6 @@ every tip spot is a resource with its own entry. This is a description of the de
 ## Save and restore contents {#save-state}
 
 ::: {.recipe}
-
-### The task
 
 Record what is in the wells, and put it back on a deck that has already been rebuilt.
 
@@ -145,13 +133,7 @@ print("all state:", len(lh.deck.serialize_all_state()), "entries")   # <2>
 2. `serialize_all_state()` returns the flat name → state mapping for the whole subtree. This is what
    `save_state_to_file` writes.
 
-[**Why it works.** State lives in trackers, not in the resource geometry. A `Well`'s volume tracker
-holds `volume`, `pending_volume`, and `max_volume`; a `TipSpot`'s tip tracker holds whether a tip is
-present. Keying by resource name is what lets state be applied to *any* tree that has resources with
-matching names — the state file does not care how the deck was built.]{.why}
-
-::: {.callout-warning}
-## Gotcha: state is keyed by name, so names are the contract
+::: {.callout-warning title="Gotcha: state is keyed by name, so names are the contract"}
 
 `load_state` matches entries to resources by name. Rename a plate between the save and the load and
 its wells no longer match, so the volumes are silently not restored — there is no error, because a
@@ -169,8 +151,6 @@ tracker directly, without a file.
 
 ::: {.recipe}
 
-### The task
-
 See what each file restores, by loading them one at a time.
 
 ```{python}
@@ -187,17 +167,11 @@ print("and B1:           ", fresh_plate["B1"][0].tracker.get_used_volume())
 1. The layout rebuilds the plate, the wells, and their positions — with empty trackers.
 2. The state fills the trackers in.
 
-[**Why it works.** `serialize()` writes constructor arguments; a well's *volume* is not one of them.
-The two files answer different questions — "what is on the deck" and "what is in it" — and a deck
-description that changed every time you pipetted would not be a description of the deck.]{.why}
-
-::: {.callout-note}
-## Which file changes when
+**Which file changes when.**
 
 The layout changes when you assign, unassign, or move labware. The state changes on every aspirate,
 dispense, pick-up, and drop. Saving state mid-run is cheap relative to the layout: about 100 KB
 against 300 KB for the deck above, and the layout is usually identical between runs.
-:::
 
 **See also:** telling PLR about an off-deck move is a *layout* change
 ([chapter 9](../part2/09_moving_labware.qmd#off-deck-moves)); telling it a trough was filled by hand
@@ -210,8 +184,6 @@ is a *state* change.
 ## Load a layout that uses classes you defined {#find-subclass}
 
 ::: {.recipe}
-
-### The task
 
 Reconstruct a deck whose `type` fields name classes that are not part of PLR.
 
@@ -241,13 +213,7 @@ except ValueError as e:
 
 1. Standing in for a layout saved by code that defined its own carrier class.
 
-[**Why it works.** `find_subclass` recurses through `cls.__subclasses__()`. Python registers a
-subclass there when the `class` statement executes — that is, when its module is imported. A class
-whose module has not been imported is not in the tree, so `find_subclass` returns `None` and
-reconstruction fails with `Could not find subclass with name ...`.]{.why}
-
-::: {.callout-warning}
-## Gotcha: import your own classes before loading
+::: {.callout-warning title="Gotcha: import your own classes before loading"}
 
 For labware you define yourself ([chapter 14](../part4/14_custom_labware.qmd)), the class must be
 imported into the loading process **before** `load_from_json_file` runs, even though the file names

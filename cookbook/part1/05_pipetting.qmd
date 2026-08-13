@@ -1,13 +1,6 @@
 ---
 title: "Pipetting"
-subtitle: "The arguments that matter: speed, height, offsets, spread, and mix"
 ---
-
-This is the most important chapter in Part I, and it is not about `aspirate` — it is about the
-*arguments*. Every real protocol is pipetting plus the modifiers that make it work: how fast, at
-what height, where inside the well, and which channels. Get these right and the call reads as
-intent; get them wrong and you have a protocol that silently under-fills, aerates, or crashes into
-the plate.
 
 ## Setup {.unnumbered}
 
@@ -51,8 +44,6 @@ Every recipe does a pick-up-then-pipette-then-drop cycle. The tip mechanics are 
 
 ::: {.recipe}
 
-### The task
-
 Move liquid from one well to another, with a tip on the head.
 
 ```{python}
@@ -67,13 +58,7 @@ await lh.drop_tips(tip_rack["A1"])
 2. `aspirate(resources, vols)` pulls liquid *from* those wells into the tips.
 3. `dispense(resources, vols)` pushes it back out into the target wells.
 
-[**Why it works.** The two calls are the two halves of a transfer, and PLR tracks both halves:
-aspirating removes volume from the source well's tracker and adds it to the tip's; dispensing does
-the reverse. The chatterbox narration shows exactly what a real machine would do — one row per
-channel, one channel here.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `vols` is a list, not a number
+::: {.callout-warning title="Gotcha: `vols` is a list, not a number"}
 
 `vols=[50]`, not `vols=50`. The length of `vols` must equal the number of channels used (here, the
 number of resources). A scalar raises `TypeError: 'int' object is not iterable`. The one place a
@@ -84,7 +69,7 @@ scalar works is inside helpers like `transfer` — see [chapter 6](../part1/06_s
 **Python you need here**
 
 `None` as "backend default", not zero. `flow_rates=None` means *use the machine's default*;
-`flow_rates=0` means *stop the pump*. This trips up nearly everyone once, usually expensively.
+`flow_rates=0` means *stop the pump*.
 :::
 
 **See also:** `mix=` at the end of this chapter performs repeated aspirate/dispense cycles in one
@@ -97,8 +82,6 @@ call.
 ## Control speed and height {#flow-height}
 
 ::: {.recipe}
-
-### The task
 
 Pipette slowly and low, to avoid aerating a viscous liquid.
 
@@ -126,13 +109,7 @@ await lh.drop_tips(tip_rack["A2"])
 3. `blow_out_air_volume` — µL of air dispensed after the liquid to clear the tip. `None` uses the
    backend default; the value here is explicit.
 
-[**Why it works.** Every argument is per-channel and `None`-permissive: `None` defers to the
-backend's default, a number overrides it. The narration shows the resolved values — `flow rate`
-50.0, `blowout` 10.0, `lld_z` 2.0 — which is how you confirm the modifiers actually took. Note the
-`lld_z` column: that is `liquid_height`, the liquid-level-detection target.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `liquid_height` is distance from the bottom, not a z-coordinate
+::: {.callout-warning title="Gotcha: `liquid_height` is distance from the bottom, not a z-coordinate"}
 
 2.0 means "2 mm above the well bottom", whatever the well's total depth. It is not an absolute z.
 If you meant "near the surface of a 100 µL column", compute that from the volume first — chapter 14
@@ -149,8 +126,6 @@ channels can behave differently; `use_channels` (below) is how you address a sub
 ## Target a position within a well {#offsets}
 
 ::: {.recipe}
-
-### The task
 
 Aspirate from the side wall of a well, or the last liquid in a corner — anywhere but dead center.
 
@@ -181,17 +156,10 @@ print("anchor:", well.get_anchor(x="l", y="b")) # <2>
    `"t"`/`"b"` for left/right, front/back, top/bottom). Compose them: `get_anchor(x="l", y="b")`
    is the bottom-left corner.
 
-[**Why it works.** The default targeting is the well *center* at a backend-chosen height.
-`offsets` are applied relative to that center, so `Coordinate(1.0, 0, 1.5)` means "1 mm toward the
-side wall, 1.5 mm up". This is the mechanism behind every "don't touch the pellet" and "scrape the
-last drop" recipe — including the bead-magnet aspirate in [chapter 9](../part2/09_moving_labware.qmd#offset-aspirate).]{.why}
-
-::: {.callout-warning}
-## Gotcha: offsets are applied to the resolved target, not to the deck
+**Gotcha: offsets are applied to the resolved target, not to the deck.**
 
 An offset moves a channel within the well it is already aimed at. It does not pick a different well
 and it is not an absolute coordinate — mixing those up drives tips into the plate between wells.
-:::
 
 **See also:** `get_anchor` and `Coordinate` also appear in [chapter 3](../part1/03_deck.qmd#locations),
 at the deck level.
@@ -203,8 +171,6 @@ at the deck level.
 ## Aspirate from one trough with 8 channels {#spread}
 
 ::: {.recipe}
-
-### The task
 
 Fill eight channels from a single 195 mL reservoir.
 
@@ -234,18 +200,11 @@ await lh.drop_tips(tip_rack["A1:H1"])
    `spread="custom"`, hands the placement back to you — supply `offsets` yourself, one per channel,
    and PLR computes nothing. That is the escape hatch when neither automatic packing fits.
 
-[**Why it works.** The narration shows the payout: eight rows, all `buffer_well_A1`, with the
-`offset` column walking the channels across the trough's width (0, ±4.5, ±13.5, ±22.5, ±31.5 mm).
-The spread logic lives in `liquid_handling.channel_positioning.compute_channel_offsets` — the
-legacy `get_wide_/get_tight_single_resource_liquid_op_offsets` are deprecated wrappers over it.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `vols` must match `use_channels`, even for one well
+**Gotcha: `vols` must match `use_channels`, even for one well.**
 
 `vols=[50] * 8` with `use_channels=list(range(8))`. Omit either and you get
 `ValueError: Length of vols must match length of use_channels`. There is no magic scalar for the
 multi-channel single-resource case.
-:::
 
 **See also:** `use_channels` also selects *which* channels act (e.g. `[0, 1, 2]` for a partial
 pick-up) — [chapter 6](../part1/06_shortcuts.qmd) and [chapter 8](../part2/08_tips.qmd) rely on it.
@@ -257,8 +216,6 @@ pick-up) — [chapter 6](../part1/06_shortcuts.qmd) and [chapter 8](../part2/08_
 ## Mix during a transfer {#mix}
 
 ::: {.recipe}
-
-### The task
 
 Mix the contents of a well while you transfer, in one call.
 
@@ -279,19 +236,11 @@ await lh.dispense(
 await lh.drop_tips(tip_rack["A4"])
 ```
 
-[**Why it works.** `mix=` is **new in 0.2.2** and replaces the hand-rolled aspirate/dispense loops
-everyone used to write. `Mix(volume, repetitions, flow_rate, surface_following_distance)` tells the
-backend to aspirate `volume` µL, dispense it back, `repetitions` times, at `flow_rate`. PLR applies
-the mix around the transfer itself — a premix before aspirating the transfer volume, a postmix
-after dispensing it.]{.why}
-
-::: {.callout-warning}
-## Gotcha: the chatterbox does not narrate the mix cycles
+**Gotcha: the chatterbox does not narrate the mix cycles.**
 
 The narration shows the transfer volume, not the mix's internal cycles — a real backend performs
 them, but chatterbox prints the op it was given. Verify a mix with the machine or the run log
 ([chapter 13](../part3/13_system_design.qmd)), not with the chatterbox output.
-:::
 
 **See also:** `surface_following_distance` tracks the liquid surface as it drops; pairing it with
 `liquid_height` from the speed/height recipe covers most cell-mixing use cases.
@@ -303,8 +252,6 @@ them, but chatterbox prints the op it was given. Verify a mix with the machine o
 ## When channels do not fit {#channel-spacing}
 
 ::: {.recipe}
-
-### The task
 
 Understand why multi-channel operations refuse a well, and how to check the spacing.
 
@@ -332,20 +279,12 @@ await lh.drop_tips(tip_rack["A5:H5"])
 4. The refusal here is `ValueError: Resource is too small to space channels.` — spread can't pack
    the channels into the well.
 
-[**Why it works.** PLR will never silently overlap channels. When a single resource is too small
-for the required spacing, it refuses the plan — before any tip moves. The rules get stricter when a
-well declares `no_go_zones` (blocked bands split the well into compartments); then the refusal is
-`ChannelsDoNotFitError: Cannot fit N channels into the compartments of '...'` instead. Two errors,
-one meaning: the geometry does not admit the plan.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `ChannelsDoNotFitError` needs no-go zones
+**Gotcha: `ChannelsDoNotFitError` needs no-go zones.**
 
 On a plain well you get the `ValueError` above, not `ChannelsDoNotFitError`. The latter is raised
 specifically by the compartment algorithm when a well has `no_go_zones` set. Catch both if you are
 probing, or fix the plan: fewer channels, a wider resource, or `spread="custom"` with your own
 offsets.
-:::
 
 **See also:** `spread="custom"` in the `#spread` recipe — the escape hatch when the automatic
 packing cannot work but you know the exact offsets you want.

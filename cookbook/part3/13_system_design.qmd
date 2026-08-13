@@ -1,15 +1,6 @@
 ---
 title: "Process and system design"
-subtitle: "Steps, recovery policy, dry runs, logging, testing, run data, and config"
 ---
-
-Parts I and II are about calling PLR. This chapter is about the code you write *around* those
-calls: the wrappers that decide what happens when a step fails, the record of what ran, and the
-files a run leaves behind.
-
-Most of what follows is ordinary Python composed around PLR, not PLR API. Four things in this
-chapter *are* PLR: its logging setup, `pylabrobot.io.capture`, `save_state_to_file`, and
-`pylabrobot.config`. Those are marked where they appear.
 
 ## Setup {.unnumbered}
 
@@ -53,8 +44,6 @@ scratch = pathlib.Path(tempfile.mkdtemp(prefix="cookbook_run_"))
 
 ::: {.recipe}
 
-### The task
-
 Turn a script into a list of named steps that record what ran.
 
 ```{python}
@@ -78,7 +67,6 @@ def step(name):
         return wrapper
     return decorator
 
-
 @step("add buffer")
 async def add_buffer(lh, plate, vol):
     await lh.pick_up_tips(rack["A1"])
@@ -96,12 +84,7 @@ print(RUN_LOG)
 3. Re-raising leaves the caller's error handling unchanged — the decorator observes, it does not
    swallow.
 
-[**Why it works.** A decorator is a function that takes a function and returns a replacement. The
-replacement here calls the original and appends a record either way, so the step's own body stays
-free of bookkeeping.]{.why}
-
-::: {.callout-important}
-## Retry granularity follows idempotency
+**Retry granularity follows idempotency.**
 
 Re-running a step re-runs everything in its body. `add_buffer` above aspirates and dispenses: run it
 twice and 100 µL moves, not 50. `lh.aspirate`, `lh.dispense`, and `lh.transfer` change state on the
@@ -111,7 +94,6 @@ Reads are different. `lh.summary()`, `deck.get_resource()`, `probe_tip_inventory
 `plate.get_quadrant()` return the same answer every time and can be repeated freely.
 
 Whatever unit you retry, that unit runs twice.
-:::
 
 **See also:** `RUN_LOG` here is the hand-rolled version of what PLR's own logger already emits —
 [below](#logging).
@@ -123,8 +105,6 @@ Whatever unit you retry, that unit runs twice.
 ## Compose recovery policy as decorators {#recovery}
 
 ::: {.recipe}
-
-### The task
 
 Give different failures different responses, without an `if` ladder inside every step.
 
@@ -147,7 +127,6 @@ def retry(times, on, backoff=0.0):                      # <1>
                         await asyncio.sleep(backoff)
         return wrapper
     return decorator
-
 
 def recover(exc_type, using):                           # <2>
     def decorator(fn):
@@ -204,14 +183,7 @@ print("attempts:", attempts["n"])
 3. Applied second.
 4. Applied **first**, so it is innermost and closest to the function body.
 
-[**Why it works.** Decorators apply bottom-up: `@step` wraps the function, `@recover` wraps that,
-`@retry` wraps that. An exception raised in the body therefore travels outward through `step`, then
-`recover`, then `retry`. Whichever decorator is outermost gets the last word, so **reordering the
-stack changes which handler acts first** — and `@step` sitting innermost is what makes it record the
-individual attempt rather than the final outcome.]{.why}
-
-::: {.callout-warning}
-## Gotcha: a blind retry re-runs the channels that worked
+::: {.callout-warning title="Gotcha: a blind retry re-runs the channels that worked"}
 
 `ChannelizedError` reports failure per channel
 ([chapter 10](../part2/10_errors.qmd#partial-failure)). Retrying the whole operation re-runs the
@@ -259,8 +231,6 @@ tier, frontend guards and geometry errors generally are not.
 
 ::: {.recipe}
 
-### The task
-
 Run the whole protocol with the motion calls disabled, so planning errors surface without moving
 anything.
 
@@ -276,7 +246,6 @@ def skip_if_dry(fn):
             return None                                 # <1>
         return await fn(*args, **kwargs)
     return wrapper
-
 
 @skip_if_dry
 async def move_liquid(lh, plate):
@@ -302,13 +271,7 @@ await move_liquid(lh, plate)
    raises `IndexError` ([chapter 7](../part2/07_worklists.qmd#validate)), so the lookup is wrapped
    rather than tested for truthiness.
 
-[**Why it works.** The decorator replaces the call, so the protocol's control flow, loops, and
-validation all execute while the operations do not. What a dry run cannot catch is anything the
-frontend only discovers by executing: volume and tip errors are raised by the trackers during a real
-call, so skipping the call skips those checks too.]{.why}
-
-::: {.callout-note}
-## Two different "without hardware"
+**Two different 'without hardware'.**
 
 Running against `LiquidHandlerChatterboxBackend` executes the frontend fully — trackers update,
 errors raise — and only the motion is absent. A dry run as above skips the frontend as well.
@@ -316,7 +279,6 @@ errors raise — and only the motion is absent. A dry run as above skips the fro
 The chatterbox validates state, not physics: it does not know that a 200 µL tip cannot hold 250 µL
 of liquid, or that a plate is not where the deck says it is
 ([chapter 1](../part1/01_robot_on_screen.qmd#workcell)).
-:::
 
 **See also:** validating worklist rows before the loop, in
 [chapter 7](../part2/07_worklists.qmd#validate).
@@ -328,8 +290,6 @@ of liquid, or that a plate is not where the deck says it is
 ## Get a run record from PLR's logger {#logging}
 
 ::: {.recipe}
-
-### The task
 
 Capture what the protocol did, without writing the recording code.
 
@@ -364,12 +324,7 @@ for line in stream.getvalue().splitlines():
 4. The dispense is not decoration: `return_tips` raises `RuntimeError: Cannot drop tip with volume
    15.0` if the tip still holds liquid ([chapter 8](../part2/08_tips.qmd#drop-return-discard)).
 
-[**Why it works.** `LiquidHandler._log_command` writes one debug record per operation containing the
-call's arguments, with resources rendered as names by `_format_param`. That is a call-level audit
-trail of the protocol, produced whether or not anyone is listening.]{.why}
-
-::: {.callout-note}
-## `verbose()` and log files
+**`verbose()` and log files.**
 
 `pylabrobot.verbose(True)` adds a console `StreamHandler`, and `configure()` calls it automatically
 when it detects a Jupyter kernel — which is why chatterbox output appears in notebooks without
@@ -378,14 +333,11 @@ setup.
 `setup_logger(log_dir, level)` attaches a `FileHandler`. Given a directory it writes
 `pylabrobot-YYYYMMDD.log` inside it; given a path ending in `.log`, `.txt`, or `.jsonl` it writes
 that file directly.
-:::
 
-::: {.callout-warning}
-## Gotcha: `logger.exception()` only inside a handler
+**Gotcha: `logger.exception()` only inside a handler.**
 
 `logging.getLogger(...).exception(msg)` attaches the *current* traceback. Called outside an
 `except` block there is no current exception, and the record says `NoneType: None`.
-:::
 
 **See also:** the `@step` decorator [above](#steps) records outcomes per step; this records
 individual calls. Both, together, are the run record.
@@ -397,8 +349,6 @@ individual calls. Both, together, are the run record.
 ## Test without hardware {#testing}
 
 ::: {.recipe}
-
-### The task
 
 Check protocol code in CI, at four levels of cost.
 
@@ -445,25 +395,17 @@ print("commands recorded:", len(recorded["commands"]))   # <2>
 1. Recording is global, not per-handler.
 2. **Zero** — see the warning below.
 
-[**Why it works.** `capturer.record` is called from the io transport layer — `io/serial.py`,
-`io/usb.py`, `io/ftdi.py`, `io/hid.py`, `io/socket.py` — so a capture contains the bytes exchanged
-with a device. `validate(capture_file)` then replays: each io call consumes the next recorded
-command, and `end_validation()` raises `ValidationError` if commands are left over.]{.why}
-
-::: {.callout-warning}
-## Gotcha: nothing is captured from a chatterbox
+::: {.callout-warning title="Gotcha: nothing is captured from a chatterbox"}
 
 The chatterbox has no io layer — it prints instead of talking to a device — so a capture taken
 around chatterbox operations contains an empty `commands` list, as above. Capture files can only be
 recorded against a backend with a real transport.
 :::
 
-::: {.callout-note}
-## Two things that are not in 0.2.2
+**Two things that are not in 0.2.2.**
 
 There is no `pylabrobot.testing` package — it exists only on `main`. `SaverBackend`, which 0.1.6
 used for this job, has been removed; `io.capture` replaces it.
-:::
 
 **See also:** `get_capture_or_validation_active()` reports whether either mode is on.
 
@@ -474,8 +416,6 @@ used for this job, has been removed; `io.capture` replaces it.
 ## Give a run its own directory {#run-data}
 
 ::: {.recipe}
-
-### The task
 
 Put everything one run produces in one place, named so it can be found later.
 
@@ -499,17 +439,10 @@ for f in sorted(run_dir.iterdir()):
 3. **These two are PLR** ([chapter 11](../part2/11_state.qmd#save-layout)): the layout says what was
    on the deck, the state says what was in it.
 
-[**Why it works.** The four artefacts answer four different questions — what was planned (the
-worklist), what was on the deck (layout), what was in it at the end (state), and what happened
-(the run log). Keeping them in one directory keyed by run id is what lets a result be traced back
-to the inputs that produced it.]{.why}
-
-::: {.callout-note}
-## Format follows job
+**Format follows job.**
 
 The [chapter 7](../part2/07_worklists.qmd#formats) rule, restated at run level: CSV for worklists,
 JSON for state and layout, append-only lines for the log.
-:::
 
 **See also:** `save_state_to_file` mid-run is a checkpoint; `load_state_from_file` resumes from it
 ([chapter 11](../part2/11_state.qmd#layout-vs-state)).
@@ -521,8 +454,6 @@ JSON for state and layout, append-only lines for the log.
 ## Configure PLR from a file {#config}
 
 ::: {.recipe}
-
-### The task
 
 Set PLR's logging level and log directory without editing protocol code.
 
@@ -553,12 +484,7 @@ level = DEBUG
 log_dir = ./logs
 ```
 
-[**Why it works.** `pylabrobot/__init__.py` calls `load_config("pylabrobot", create_default=False)`
-at import time and passes the result to `configure()`, which calls `setup_logger()`. The file is
-read once, when you first import PLR.]{.why}
-
-::: {.callout-warning}
-## Gotcha: device addresses do not go here
+**Gotcha: device addresses do not go here.**
 
 `Config` has one field, `logging`. There is nowhere in it for serial ports, USB identifiers, or
 host/port settings — those are constructor arguments to the backend or the `Visualizer`
@@ -570,7 +496,6 @@ read with `json`, `tomllib`, or `configparser`, and passed to the constructor:
 settings = json.loads(pathlib.Path("instrument.json").read_text())
 backend = STARBackend(**settings["star"])
 ```
-:::
 
 **See also:** `IniLoader`, `JsonLoader`, and `MultiLoader` in `pylabrobot.config.formats` are the
 readers behind `load_config`.

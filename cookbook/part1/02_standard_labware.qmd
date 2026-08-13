@@ -1,12 +1,6 @@
 ---
 title: "Standard labware"
-subtitle: "Reading names, finding parts, and searching the resource tree"
 ---
-
-Before you can move liquid you have to name the things you move. PLR ships a large library of
-real labware — 26 vendor packages, 143 plate definitions at the time of writing — and this chapter
-is about navigating it: how the names are built, how to find the part you physically own, and how
-to look things up once they are on a deck.
 
 ## Setup {.unnumbered}
 
@@ -41,8 +35,6 @@ carrier[1] = trough = nest_1_troughplate_195000uL_Vb(name="buffer")
 
 ::: {.recipe}
 
-### The task
-
 Read `nest_1_troughplate_195000uL_Vb` and know, without looking it up, roughly what it is.
 
 The naming convention is a decoder ring. Every current name is built the same way:
@@ -74,12 +66,7 @@ print("instance:", plate.name, "/", trough.name)       # <2>
 - **bottom** — the well-bottom shape: `Fb` (flat), `Vb` (V-shaped), `U`/`Ub`. This is not cosmetic;
   it drives the volume↔height math (chapter 14).
 
-[**Why it works.** The scheme is designed to be decoded, not memorized. `nest_1_troughplate_195000uL_Vb`
-reads "NEST, single-well trough, 195 mL, V-bottom" — which is exactly the object you hold. When a
-name breaks the pattern, the docstring usually says why.]{.why}
-
-::: {.callout-important}
-## The library is mid-rename — old names still import
+::: {.callout-important title="The library is mid-rename — old names still import"}
 
 The convention above is the *current* one. Roughly ten vendor packages still carry old-style names
 as **deprecation shims** marked `# remove v1b1` in the source — e.g. `Cor_96_wellplate_360ul_Fb`
@@ -102,8 +89,6 @@ print anything.
 
 ::: {.recipe}
 
-### The task
-
 You physically own a Corning 3603 microplate. Which import is it?
 
 Every definition's docstring carries the manufacturer's catalog number. Ask the library:
@@ -123,20 +108,13 @@ print(cor_96_wellplate_360uL_Fb.__doc__.splitlines()[0])   # <1>
    opens with `Corning cat. no.s: 3603` — that is your plate. The full docstring also carries the
    manufacturer link, distributor, material, and notes.
 
-[**Why it works.** The library is organized by vendor package, then by file (`plates.py`,
-`troughs.py`, `tip_racks.py`, ...), and each factory function documents the physical part it
-models. Catalog numbers live in the docstrings precisely so "I have a Corning 3603" can be
-answered by reading, not by memorizing.]{.why}
-
-::: {.callout-note}
-## What to do when the part is not there
+**What to do when the part is not there.**
 
 - **Grep the source** for the catalog number — it may be defined under a slightly different name.
 - **Use the closest definition** and note the difference in a comment. Nobody measures a well to
   the micron.
 - **Define it yourself** — that is the subject of chapter 14, and 0.2.2 famously ships no PCR plate
   at all, so the chapter builds one.
-:::
 
 **See also:** the vendor package list is `pylabrobot.resources.*` — 26 packages including the new-in-0.2.2
 `bioer`, `btx`, `diy`, `greiner`, `imcs`, and `perkin_elmer`. The old `corning_axygen`,
@@ -149,8 +127,6 @@ answered by reading, not by memorizing.]{.why}
 ## Look up a resource by name {#get-resource}
 
 ::: {.recipe}
-
-### The task
 
 Given a deck you did not build, find the plate called "sample_plate" — or fail loudly if it is not
 there.
@@ -180,17 +156,10 @@ A missing name raises `ResourceNotFoundError: Resource 'no_such_plate' not found
 eight *portable* errors that raise identically on every backend
 ([chapter 10](../part2/10_errors.qmd#portable-errors)).
 
-[**Why it works.** Names are unique within a tree, and PLR *enforces* it: assigning a resource whose
-name already exists raises `ValueError: Resource 'sample_plate' already assigned to deck` at
-assignment time, before anything can go subtly wrong. Because uniqueness is guaranteed, a
-name lookup either finds the one right resource or raises.]{.why}
-
-::: {.callout-warning}
-## Gotcha: the tree is state, not a directory
+**Gotcha: the tree is state, not a directory.**
 
 `get_resource` sees what PLR *thinks* is on the deck. Move a plate by hand and PLR still thinks it
 is where it was — which is exactly the off-deck bookkeeping problem in [chapter 9](../part2/09_moving_labware.qmd#off-deck-moves). A lookup is only as truthful as the model behind it.
-:::
 
 **See also:** `ResourceNotFoundError` is catalogued with the rest of the portable errors in
 [chapter 10](../part2/10_errors.qmd).
@@ -202,8 +171,6 @@ is where it was — which is exactly the off-deck bookkeeping problem in [chapte
 ## Search the library {#query}
 
 ::: {.recipe}
-
-### The task
 
 Filter a resource tree by type or by name pattern, in one call.
 
@@ -225,12 +192,7 @@ print("A1:", [w.name for w in a1])
    semantics, so `.*_well_A1$` pins down exactly well A1 (the `$` matters — `.*_A1` alone also
    matches A10, A11, A12).
 
-[**Why it works.** `query` walks the tree depth-first, appending every resource that passes the
-filters, and also supports `x`/`y`/`z` coordinate filters. It is the attribute-oriented complement
-to `get_resource`'s exact-name lookup.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `query` prunes branches that do not match
+::: {.callout-warning title="Gotcha: `query` prunes branches that do not match"}
 
 `query` only *descends into* nodes that themselves match the filters. Search the deck for wells
 and you get nothing, because the carriers above the wells do not match `type_=Well` and their

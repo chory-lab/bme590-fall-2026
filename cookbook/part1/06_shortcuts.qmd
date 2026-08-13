@@ -1,12 +1,6 @@
 ---
 title: "The shortcuts"
-subtitle: "transfer, use_channels, the 96-head, and the one that is broken"
 ---
-
-The operations in [chapter 5](../part1/05_pipetting.qmd) are the primitives. This chapter is the
-layer above them: calls that replace twenty hand-rolled lines with one, and the 96-head variants
-that move a whole plate at once. Plus the one shortcut that is broken in 0.2.2 and should be
-avoided until it is fixed.
 
 ## Setup {.unnumbered}
 
@@ -40,8 +34,6 @@ plate["A1"][0].set_volume(1000)          # a source with liquid
 
 ::: {.recipe}
 
-### The task
-
 Distribute a volume from one source well into several target wells.
 
 ```{python}
@@ -59,13 +51,7 @@ await lh.drop_tips(tip_rack["A1"])
 2. `targets` is a list of `Well`s — one dispense per target, all from the same aspirated volume.
 3. `target_vols` sets each dispense; the aspirate volume is the sum (100 µL here).
 
-[**Why it works.** `transfer` routes through `aspirate` then `dispense` — the narration shows one
-aspiration of 100 µL followed by two dispenses of 40 and 60 µL. It is the same operations you would
-write by hand, but the aspirate/dispense pairing, per-target volumes, and bookkeeping are done for
-you. This is the single most-used shortcut in the book.]{.why}
-
-::: {.callout-warning}
-## Gotcha: `source_vol` and `target_vols` are mutually exclusive
+::: {.callout-warning title="Gotcha: `source_vol` and `target_vols` are mutually exclusive"}
 
 `transfer(..., source_vol=..., target_vols=...)` raises
 `TypeError: Cannot specify source_vol and target_vols at the same time`. Pick one source of truth:
@@ -89,8 +75,6 @@ standard-curve or dilution patterns in [chapter 7](../part2/07_worklists.qmd).
 
 ::: {.recipe}
 
-### The task
-
 Tell PLR "only these channels act" for a block of pipetting, then revert.
 
 ```{python}
@@ -106,18 +90,11 @@ await lh.drop_tips(tip_rack["A3", "B3"])         # <2>
    0 and 1. You no longer pass `use_channels=` on each call.
 2. Outside the block, the default reverts — the drop uses whatever the default head is.
 
-[**Why it works.** `use_channels` temporarily changes `LiquidHandler`'s default channel set, which
-is what `aspirate` falls back on when you omit `use_channels`. Wrapping it in a `with` guarantees
-the default is restored even if the block raises — the same scoping idea PLR applies to
-`no_volume_tracking()` ([chapter 10](../part2/10_errors.qmd)).]{.why}
-
-::: {.callout-warning}
-## Gotcha: `use_channels` is a synchronous context manager
+**Gotcha: `use_channels` is a synchronous context manager.**
 
 It is `with lh.use_channels(...)`, **not** `async with`. Using `async with` raises
 `TypeError: ... does not support the asynchronous context manager protocol`. The operations *inside*
 the block are still `await`ed — only the channel scoping is sync.
-:::
 
 **See also:** `use_channels` combines with the `[well] * n` idiom from
 [chapter 5](../part1/05_pipetting.qmd#spread) when several channels share one source.
@@ -129,8 +106,6 @@ the block are still `await`ed — only the channel scoping is sync.
 ## 96-head operations {#head96}
 
 ::: {.recipe}
-
-### The task
 
 Aspirate from every well of a plate at once, or move all 96 tips in one call.
 
@@ -147,17 +122,11 @@ await lh.drop_tips96(tip_rack)
    gets the same amount.
 3. `dispense96` mirrors it. A full plate processed in three calls.
 
-[**Why it works.** The `*96` family is the same frontend as the per-channel ops, packaged for the
-96-head: one resource, one scalar. They also carry the per-op extras — `offset`, `flow_rate`,
-`liquid_height`, `mix` — so nothing from [chapter 5](../part1/05_pipetting.qmd) is lost at scale.]{.why}
-
-::: {.callout-note}
-## The whole-plate flavor
+**The whole-plate flavor.**
 
 `aspirate96(plate)` reads the entire plate. To hit only a column or a subset, pass a list of
 wells instead — `aspirate96(plate["A1:H1"], volume=25)` works the same way. You keep the scalar
 `volume` either way.
-:::
 
 **See also:** `stamp()` is *supposed* to be the plate-to-plate shortcut built on the 96-head —
 [see below](#stamp-broken) for why it is not usable yet.
@@ -168,8 +137,7 @@ wells instead — `aspirate96(plate["A1:H1"], volume=25)` works the same way. Yo
 
 ## The one that is broken: `stamp()` {#stamp-broken}
 
-::: {.callout-warning appearance="simple"}
-## Do not build on `lh.stamp()` in 0.2.2
+::: {.callout-warning appearance="simple" title="Do not build on `lh.stamp()` in 0.2.2"}
 
 `stamp(source, target, volume)` **dispenses back into `source`**, not `target`. The narration
 proves it — run it and both operations name the source plate:
@@ -184,11 +152,6 @@ Dispensing 25.0 to Plate(name='stamp_source', ...)   # should be stamp_target
 fixed, do a plate-to-plate transfer the explicit way — `aspirate96(source)` then
 `dispense96(target)` — and if you can, file the upstream PR; it is a two-line fix.
 :::
-
-[**Why it is worth knowing.** `stamp()` is the textbook "trust the docstring, not the source"
-lesson. It imports, it runs, it even checks shape — nothing tells you the liquid goes to the wrong
-place except reading what it actually does. That is the exact habit [chapter 10](../part2/10_errors.qmd)
-and chapter 15 build on.]{.why}
 
 ---
 

@@ -1,20 +1,8 @@
 ---
 title: "Moving labware"
-subtitle: "Grippers, lids, stacks, and telling PLR the truth"
 ---
 
-A liquid handler moves two kinds of thing: liquid, and labware. This chapter is the second kind —
-picking up a plate and putting it somewhere else, whether that somewhere is a carrier position, a
-magnet, a stack, or a machine.
-
-There is a second, quieter job in this chapter, and it is the one that causes most of the bugs:
-**PLR's model of the deck is only as correct as you keep it.** A plate you moved by hand is still on
-its old carrier as far as PLR knows, and the next `aspirate` will happily drive a channel to where
-the plate used to be. Every recipe here is partly about the move and partly about the bookkeeping.
-
 ## Setup {.unnumbered}
-
-Every recipe in this chapter runs against this deck.
 
 ```{python}
 #| label: cell-setup
@@ -58,19 +46,12 @@ assignment you would write for a list, and it does the `assign_child_resource` c
 
 ::: {.recipe}
 
-### The task
-
 Move a plate from one carrier position to another.
 
 ```{python}
 #| label: move-basic
 await lh.move_plate(plate, carrier[2])
 ```
-
-[**Why it works.** `move_plate` is a convenience wrapper over `move_resource`. It resolves the
-destination to a location, tells the backend to pick up, traverse, and drop, and — importantly —
-reassigns the plate in the resource tree so `lh.deck` now believes the plate is at position 2.
-The bookkeeping is not something you do afterwards; it is part of the call.]{.why}
 
 The destination is deliberately permissive. Any of these work:
 
@@ -100,13 +81,11 @@ await lh.move_plate(plate, some_machine.loading_tray)
 
 :::
 
-::: {.callout-warning}
-## Gotcha: the grip is on the plate, not the plate *and* its lid
+**Gotcha: the grip is on the plate, not the plate *and* its lid.**
 
 `move_plate` grips the plate body. If the plate has a lid on it, the lid is not held — depending on
 the gripper and the plate, it can be left behind or dragged. Move the lid first
 ([next recipe](#move-a-lid)), or move the plate and lid as a unit only if your gripper supports it.
-:::
 
 **See also:** `lh.move_resource()` for the general form, `lh.pick_up_resource()` /
 `move_picked_up_resource()` / `drop_resource()` when you need the three phases separately.
@@ -118,8 +97,6 @@ the gripper and the plate, it can be left behind or dragged. Move the lid first
 ## Take the lid off a plate and put it back {#move-a-lid}
 
 ::: {.recipe}
-
-### The task
 
 Deck a plate's lid somewhere while you pipette, then re-lid it.
 
@@ -145,17 +122,11 @@ await lh.move_lid(lid, lidded)              # <3>
    containers other than plates can be liddable too.
 3. Moving a lid *to* a plate re-lids it — the plate is a valid destination, not just a location.
 
-[**Why it works.** A lid is an ordinary `Resource` that happens to be assigned to a plate rather
-than to a carrier. Moving it is the same tree operation as moving anything else; `Liddable` just
-gives the plate somewhere specific to put it and a `has_lid` property to ask about it.]{.why}
-
-::: {.callout-note}
-## A seal is not a lid
+**A seal is not a lid.**
 
 If your process heat-seals a plate rather than lidding it, there is no `Lid` object to move — the
 seal is applied by a machine and PLR has no representation of it. Model it however you like
 (a flag on your own protocol state), but do not expect `has_lid` to know about it.
-:::
 
 :::
 
@@ -163,12 +134,7 @@ seal is applied by a machine and PLR has no representation of it. Model it howev
 
 ## Move a plate onto a magnetic bead stand {#move-plate-to-magnet}
 
-This is the recipe worth reading even if you never touch a magnet, because it is where geometry and
-movement meet.
-
 ::: {.recipe}
-
-### The task
 
 Move a plate onto an Alpaqua Magnum FLX magnetic rack for a bead cleanup, then take it off again.
 
@@ -189,13 +155,7 @@ await lh.move_plate(plate, carrier[0])                       # <3>
    location. `compute_plate_location()` does this from the plate's own well geometry.
 3. Coming off the magnet is the same call in reverse.
 
-[**Why it works.** A `PlateAdapter` exists precisely for labware that holds a plate at a
-non-obvious height — magnets, thermocycler blocks, on-deck modules. The Magnum FLX is 35 mm tall
-with the plate sunk into it, so "put the plate here" cannot mean "at this z". The adapter derives
-the plate's position from its own dimensions and the plate's well geometry.]{.why}
-
-::: {.callout-important}
-## A magnet is not a machine
+**A magnet is not a machine.**
 
 Nothing turns this magnet on. **Engagement is the plate's position** — the field is always there,
 and the plate being on the adapter is what puts the beads in it. This is the same idea as
@@ -207,10 +167,8 @@ site.assign_child_resource(plate)
 ```
 
 State expressed by position rather than by command. Once you see it, a lot of PLR reads differently.
-:::
 
-::: {.callout-warning}
-## Gotcha: `plate_z_offset` is not universal
+::: {.callout-warning title="Gotcha: `plate_z_offset` is not universal"}
 
 The shipped definition carries this comment:
 
@@ -224,15 +182,14 @@ deep-well block do not sit at the same height on the same magnet. Check it again
 before running unattended, or you will aspirate air, or worse, drive into the plate.
 :::
 
-::: {.callout-warning}
-## Gotcha: use the snake_case name
+::: {.callout-warning title="Gotcha: use the snake_case name"}
 
 `Alpaqua_96_magnum_flx` still exists but is a deprecation shim marked `# TODO: Remove >2026-02`.
 Use `alpaqua_96_plateadapter_magnum_flx`. This rename is part of a library-wide migration to
 `<vendor>_<n>_<type>_<volume>uL_<bottom>`; expect to meet it elsewhere.
 :::
 
-### Aspirating off the magnet {#offset-aspirate}
+## Aspirating off the magnet {#offset-aspirate}
 
 The reason bead protocols exist is to remove supernatant without disturbing the pellet, which lives
 on one side of the well. That is an *offset*, not a different well:
@@ -263,8 +220,6 @@ await lh.aspirate(
 
 ::: {.recipe}
 
-### The task
-
 Pull the top plate off a hotel stack without tracking the index yourself.
 
 ```{python}
@@ -282,15 +237,10 @@ await lh.move_plate(top, carrier[0])
 1. `get_top_item()` returns whatever is currently on top. After the move it returns the next plate
    down, because `move_plate` reassigned the one you took.
 
-[**Why it works.** A `ResourceStack` stacks children along an axis and computes each child's
-location from the heights of the ones below it. You never compute a z; you ask for the top.]{.why}
-
-::: {.callout-warning}
-## Gotcha: an empty stack
+**Gotcha: an empty stack.**
 
 `get_top_item()` on an empty stack raises rather than returning `None`. Check length first if the
 stack can run out.
-:::
 
 :::
 
@@ -299,8 +249,6 @@ stack can run out.
 ## Tell PLR a plate moved while it was off-deck {#off-deck-moves}
 
 ::: {.recipe}
-
-### The task
 
 An operator carried a plate to a thermocycler across the room and brought it back to a different
 position. No PLR call happened. Fix the model.
@@ -315,18 +263,9 @@ carrier[4].assign_child_resource(plate)     # <2>
 1. Detach from wherever PLR thinks it is.
 2. Attach where it actually is.
 
-[**Why it works.** These two lines are the whole of what `move_plate` does to the resource tree
-once the motion is stripped away — which is exactly why `Incubator.take_in_plate()` ends with the
-same pair. Moving labware and *recording* that labware moved are separable, and when a human does
-the moving you only need the second half.]{.why}
-
-::: {.callout-important}
-## This is the most under-used pattern in PLR
-
 Every protocol that involves a human step, an off-deck machine, or a manual intervention needs
 this. The alternative — leaving PLR's model stale — produces the worst class of bug in lab
 automation: the robot is confidently, precisely wrong.
-:::
 
 :::
 

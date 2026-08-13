@@ -1,6 +1,5 @@
 ---
 title: "Cheat sheet"
-subtitle: "Flat lookup: call, signature, what it does"
 ---
 
 Every signature on this page is read from the installed PyLabRobot when the book is built, so it
