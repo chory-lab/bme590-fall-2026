@@ -1,0 +1,15 @@
+---
+title: "Process and system design"
+---
+
+::: {.callout-note appearance="simple"}
+Not yet written. See `PLAN.md` §3 for this chapter's scope.
+:::
+
+**Planned recipes**
+
+- Compose recovery policy as decorators
+- Dry-run a protocol
+- Build a run record
+- Test without hardware
+- Manage run data and config

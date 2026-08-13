@@ -1,0 +1,13 @@
+---
+title: "Saving and loading"
+---
+
+::: {.callout-note appearance="simple"}
+Not yet written. See `PLAN.md` §3 for this chapter's scope.
+:::
+
+**Planned recipes**
+
+- Save a deck layout
+- Save and restore contents
+- Why layout and state are different files

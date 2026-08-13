@@ -1,0 +1,13 @@
+---
+title: "Tips"
+---
+
+::: {.callout-note appearance="simple"}
+Not yet written. See `PLAN.md` §3 for this chapter's scope.
+:::
+
+**Planned recipes**
+
+- Drop vs return vs discard
+- Stream tips across several racks
+- Probe and consolidate tip inventory

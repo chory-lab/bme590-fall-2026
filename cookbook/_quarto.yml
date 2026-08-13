@@ -1,0 +1,87 @@
+project:
+  type: book
+  output-dir: _site
+
+book:
+  title: "The PyLabRobot Cookbook"
+  subtitle: "Liquid handling, resource definition, and lab automation in Python"
+  description: >
+    A task-indexed manual for PyLabRobot 0.2.2. Broad coverage of the everyday
+    surface, then two guided builds: define your own labware, and write your own
+    liquid handler backend.
+  date: today
+  date-format: "MMMM YYYY"
+  search: true
+  page-navigation: true
+  reader-mode: true
+  sidebar:
+    style: docked
+    collapse-level: 1
+  chapters:
+    - index.qmd
+    - recipes.qmd
+
+    - part: "Part I — Getting things done"
+      chapters:
+        - part1/01_robot_on_screen.qmd
+        - part1/02_standard_labware.qmd
+        - part1/03_deck.qmd
+        - part1/04_indexing.qmd
+        - part1/05_pipetting.qmd
+        - part1/06_shortcuts.qmd
+
+    - part: "Part II — Working protocols"
+      chapters:
+        - part2/07_worklists.qmd
+        - part2/08_tips.qmd
+        - part2/09_moving_labware.qmd
+        - part2/10_errors.qmd
+        - part2/11_state.qmd
+        - part2/12_hardware.qmd
+
+    - part: "Part III — Building systems"
+      chapters:
+        - part3/13_system_design.qmd
+
+    - part: "Part IV — Extending PyLabRobot"
+      chapters:
+        - part4/14_custom_labware.qmd
+        - part4/15_custom_liquid_handler.qmd
+
+    - CHEATSHEET.qmd
+
+format:
+  html:
+    theme:
+      light: [cosmo, _theme-light.scss]
+      dark: [darkly, _theme-dark.scss]
+    toc: true
+    toc-depth: 3
+    toc-expand: 2
+    code-annotations: hover
+    code-copy: true
+    code-overflow: wrap
+    code-tools: false
+    highlight-style: github
+    fig-responsive: true
+    tbl-cap-location: bottom
+    citations-hover: true
+    grid:
+      sidebar-width: 290px
+      body-width: 900px
+      margin-width: 290px
+
+  pdf:
+    documentclass: scrbook
+    papersize: a4
+    toc-depth: 2
+    colorlinks: true
+
+execute:
+  freeze: auto      # cache renders; CI clears the cache to catch API drift
+  warning: true
+  error: false      # a failing recipe must fail the build
+
+# Applied to every page. `plr` is surfaced in the recipe listing so a recipe
+# can be checked against the version it was written for.
+plr: "0.2.2"

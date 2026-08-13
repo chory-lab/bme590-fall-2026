@@ -3,3 +3,11 @@ __pycache__/
 .vscode
 .DS_Store
 assignments/
+cookbook/_site/
+cookbook/_freeze/
+
+# Render environment for the cookbook: PLR 0.2.2 + jupyter.
+# Recreate with:
+#   py -3.13 -m venv .venv-cookbook
+#   .venv-cookbook/Scripts/python -m pip install "pylabrobot==0.2.2" jupyter
+.venv-cookbook/

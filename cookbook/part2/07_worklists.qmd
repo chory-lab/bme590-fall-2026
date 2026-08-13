@@ -1,0 +1,332 @@
+---
+title: "Worklists and data formats"
+subtitle: "CSV in, operations out, results back — the seam between PLR and everything else"
+---
+
+Let's be honest about something up front: **PyLabRobot ships no worklist support.** No `.gwl`
+import, no CSV reader, `pandas` appears in exactly one file in the whole package. That is not a
+gap — it is a design fact worth knowing, because worklists are not a PLR feature. They are how PLR
+*meets everything around it*: a LIMS export, an instrument scheduler, an ELN record, a colleague's
+spreadsheet. This chapter teaches that seam — reading a plan, validating it, executing it, and
+writing the result back — with the standard library alone.
+
+## Setup {.unnumbered}
+
+```{python}
+#| label: cell-setup
+#| output: false
+import csv, pathlib, tempfile
+
+from pylabrobot.liquid_handling import LiquidHandler
+from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+from pylabrobot.resources import (
+    STARLetDeck, PLT_CAR_L5AC_A00, cor_96_wellplate_360uL_Fb,
+    opentrons_96_filtertiprack_200ul, TIP_CAR_288_C00,
+)
+
+lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
+await lh.setup()
+
+carrier = PLT_CAR_L5AC_A00(name="carrier")
+lh.deck.assign_child_resource(carrier, rails=10)
+carrier[0] = source = cor_96_wellplate_360uL_Fb(name="source")
+carrier[1] = target = cor_96_wellplate_360uL_Fb(name="target")
+
+tips = TIP_CAR_288_C00(name="tip_carrier")
+lh.deck.assign_child_resource(tips, rails=2)
+tips[0] = tip_rack = opentrons_96_filtertiprack_200ul(name="tips")
+
+source["A1"][0].set_volume(2000)
+
+scratch = pathlib.Path(tempfile.mkdtemp(prefix="cookbook_worklist_"))   # <1>
+print("scratch dir:", scratch)
+```
+
+1. Recipes write their files to a throwaway directory, so the notebook leaves nothing behind.
+   Real runs use a timestamped run directory instead — [chapter 13](../part3/13_system_design.qmd)
+   makes that the rule.
+
+::: {.column-margin}
+**Python you need here**
+
+`csv` and `pathlib` are the two imports of this chapter. A worklist is plain data; the `csv`
+module reads and writes it, `pathlib.Path` handles paths without string surgery. Reserve
+`pandas` for when you actually need its features — grouping, statistics, plotting — not for reading
+three columns (see the note in the CSV recipe).
+:::
+
+---
+
+## Drive a run from a CSV {#csv-run}
+
+::: {.recipe}
+
+### The task
+
+Take a spreadsheet of transfers — one row per transfer — and execute it.
+
+```{python}
+#| label: cell-csv-run
+worklist = scratch / "worklist.csv"
+with open(worklist, "w", newline="") as f:                   # <1>
+    writer = csv.writer(f)
+    writer.writerow(["target", "volume"])
+    for col in range(1, 5):
+        writer.writerow([f"B{col}", 25])
+
+with open(worklist, newline="") as f:                        # <2>
+    rows = list(csv.DictReader(f))
+print(rows)
+
+tip = 0                                                      # <3>
+for row in rows:
+    await lh.pick_up_tips(tip_rack[tip])
+    await lh.transfer(
+        source["A1"][0],
+        targets=[target[row["target"]][0]],
+        target_vols=[float(row["volume"])],
+    )
+    await lh.drop_tips(tip_rack[tip])
+    tip += 1
+```
+
+1. The worklist is ordinary CSV: a header, then one transfer per row. Any spreadsheet exports
+   this.
+2. `csv.DictReader` gives each row as a dict keyed by the header — `{"target": "B1", "volume": "25"}`.
+   Values are strings; the `float()` when you use them is the reminder.
+3. The loop is the whole "driver": one tip per transfer, `lh.transfer` per row. Five lines of glue
+   between the file and the robot.
+
+[**Why it works.** `lh.transfer` already does aspirate-once-dispense-many; the worklist just supplies
+its arguments row by row. The narration shows the robot executing exactly what the file said —
+which is the point: the CSV is now a *plan* that can be reviewed, versioned, and diffed like any
+other code, and it does not care whether it was written by hand or exported by a LIMS.]{.why}
+
+::: {.callout-note}
+## pandas, honestly
+
+A three-column worklist does not need a `DataFrame`. The stdlib `csv` module reads it faster than
+pandas even loads, with zero dependencies. Reach for pandas when the work demands it — a 10,000-row
+file you also want to group and plot — not for reading rows. The seam stays identical either way:
+it produces a list of `(target, volume)` pairs.
+:::
+
+**See also:** `#validate` runs checks on these rows *before* the loop; `#batching` reorders them
+for multi-channel heads.
+
+:::
+
+---
+
+## Validate before moving a channel {#validate}
+
+::: {.recipe}
+
+### The task
+
+Check every row of a worklist before a single tip moves.
+
+```{python}
+#| label: cell-validate
+errors = []
+for i, row in enumerate(rows, start=1):                            # <1>
+    if not target[row["target"]]:                                  # <2>
+        errors.append(f"row {i}: no such well {row['target']}")
+    if float(row["volume"]) > source["A1"][0].tracker.get_free_volume():   # <3>
+        errors.append(f"row {i}: source has too little liquid")
+print("errors:", errors)                                           # <4>
+```
+
+1. `rows` from the previous recipe — the worklist is a plain list of dicts, so validation is just
+   a loop.
+2. `target[...]` returns `[]` for a nonexistent well — falsy, so "does this well exist" is one
+   `if`.
+3. `get_free_volume()` on the source's tracker answers "is there enough liquid" without guessing.
+4. An empty list means go. This is the entire job: cheap, read-only, and it catches the failures
+   that cost a run.
+
+[**Why it works.** Validation is pure Python over the same data structure the driver reads. No
+robot calls happen, so a bad worklist costs milliseconds instead of a ruined run. The discipline —
+plan, validate, then move a channel — is exactly what `@dry_run` automates end to end in
+[chapter 13](../part3/13_system_design.qmd).]{.why}
+
+::: {.callout-warning}
+## Gotcha: validate the *parsed* worklist, not the file
+
+`csv` values are strings — a `"volume"` of `"abc"` sails through `float()` checks only if you cast
+first. Validate the parsed rows (`float(row["volume"])`) so a typo surfaces as a validation error,
+not as a `ValueError` mid-run.
+:::
+
+**See also:** a stricter checker for well IDs can reuse `split_identifier` from
+[chapter 4](../part1/04_indexing.qmd#labels).
+
+:::
+
+---
+
+## Group rows into channel-parallel batches {#batching}
+
+::: {.recipe}
+
+### The task
+
+You have an 8-channel head. Turn a one-row-per-well worklist into batches your channels can do in
+parallel.
+
+```{python}
+#| label: cell-batching
+from pylabrobot.resources.utils import sort_by_xy_and_chunk_by_x
+
+# 12 target wells: rows A and B across six columns, deliberately out of column order
+targets = [target[cell][0] for cell in ["A1", "B1", "A2", "B2", "A3", "B3",   # <1>
+                                        "A4", "B4", "A5", "B5", "A6", "B6"]]
+
+batches = sort_by_xy_and_chunk_by_x(targets, max_chunk_size=8)     # <2>
+for batch in batches:
+    print([w.name.split("well_")[1] for w in batch])               # <3>
+```
+
+1. **`target[cell]` returns a list**, always — `[0]` unwraps the single well. Feed the raw lists to
+   the chunker and it sorts lists instead of wells, which fails on the first coordinate lookup.
+2. `sort_by_xy_and_chunk_by_x(resources, max_chunk_size)` sorts by x, then groups resources with
+   the same x into chunks no larger than `max_chunk_size`. **New in 0.2.2**, purpose-built for this
+   exact problem.
+3. Each chunk shares a column — an 8-channel head fills it in one pass.
+
+[**Why it works.** A column has one x-coordinate, so "group by identical x" is "group by column" —
+and columns are exactly what an 8-channel head handles. The output is a list of lists you can feed
+straight to `aspirate`/`dispense` with `use_channels=list(range(len(batch)))`, or loop over with
+`traverse`-style batches from [chapter 4](../part1/04_indexing.qmd#traverse).]{.why}
+
+::: {.callout-warning}
+## Gotcha: chunk size is about channels, not wells
+
+`max_chunk_size=8` is the number of channels on the head. It does not cap the total worklist —
+long lists split into many batches of eight. Pick it from your hardware
+(`lh.backend.get_channel_spacings` in [chapter 5](../part1/05_pipetting.qmd#channel-spacing)),
+not from the file length.
+:::
+
+**See also:** `sort_by_xy_and_chunk_by_x` is the sibling of the `query` helpers from
+[chapter 2](../part1/02_standard_labware.qmd#query), all in `resources/utils.py`.
+
+:::
+
+---
+
+## Write results back out {#results}
+
+::: {.recipe}
+
+### The task
+
+After the run, produce a plate map your colleagues can open.
+
+```{python}
+#| label: cell-results
+plate_map = scratch / "plate_map.csv"
+with open(plate_map, "w", newline="") as f:                        # <1>
+    writer = csv.writer(f)
+    writer.writerow(["well", "volume_ul"])
+    for well in target.get_all_children():
+        writer.writerow([
+            well.name.split("well_")[1],
+            well.tracker.get_used_volume(),
+        ])
+
+with open(plate_map, newline="") as f:                             # <2>
+    for row in csv.DictReader(f):
+        if float(row["volume_ul"]) > 0:
+            print(row)
+```
+
+1. `get_all_children()` walks the target plate ([chapter 1](../part1/01_robot_on_screen.qmd#summary));
+   `get_used_volume()` reads each well's tracker. Write once, in the same CSV shape you read.
+2. Reading it back proves the file is what you think it is — the cheapest correctness check for
+   any exported artifact.
+
+[**Why it works.** The run log is PLR's native record, but colleagues want a spreadsheet. This is
+the last link in the seam: plan in CSV, execute, write results in CSV. The same `get_used_volume()`
+data is what the checkers in the recipes index read, and what [chapter 11](../part2/11_state.qmd)
+saves as JSON when you need the full state rather than a summary.]{.why}
+
+::: {.callout-warning}
+## Gotcha: volumes are floats; write what you mean
+
+`get_used_volume()` returns `0.0` for empty wells, not `None`. Decide whether your plate map should
+say `0` or `""` for "nothing here" — mixing the two breaks every consumer that does arithmetic on
+the column.
+:::
+
+**See also:** a run record with timestamps is a *log*, not a CSV — [chapter 13](../part3/13_system_design.qmd)
+shows why the format should follow the job.
+
+:::
+
+---
+
+## Pick a format {#formats}
+
+::: {.recipe}
+
+### The task
+
+Choose the right file format for each kind of data — the one rule that ends most format debates.
+
+| Job | Format | Why |
+|---|---|---|
+| **Worklists** (what to do) | **CSV** | one row per transfer; anyone can open, edit, diff, and export it |
+| **State** (what is where) | **JSON** | nested structure; it is PLR's own serialization format ([chapter 11](../part2/11_state.qmd)) |
+| **Audit** (what happened) | **Log lines** | append-only, timestamped, greppable; a CSV you re-open is not a log |
+
+CSV — the worklist:
+
+```csv
+target,volume
+B1,25
+B2,25
+```
+
+JSON — the state (a slice of PLR's `serialize_state`):
+
+```json
+{"name": "target_well_A1", "volume": 25.0, "children": []}
+```
+
+Log lines — the audit (a slice of PLR's `_log_command` output):
+
+```text
+2026-08-12 14:03:11 DEBUG aspirate(resources=[<Well A1>], vols=[25.0], ...)
+```
+
+[**Why it works.** The three formats exist for three jobs, and the jobs have different shapes:
+a worklist is flat and ordered (CSV fits), state is nested (JSON fits), an audit is append-only
+history (log lines fit). Trying to make one format do another's job is where the pain comes from —
+the most common being "the CSV I also use as a log," which is neither append-only nor greppable
+once re-saved.]{.why}
+
+::: {.callout-note}
+## PLR gives you the audit for free
+
+Every operation is already logged through `logging` ([chapter 13](../part3/13_system_design.qmd)).
+A run log — greppable, diffable, gradeable — is three lines of `basicConfig`. It beats a screenshot
+as a deliverable for exactly the reason this chapter exists: it is the machine-readable truth about
+what the run did.
+:::
+
+**See also:** `sort_by_xy_and_chunk_by_x` for the same data in a different shape; the format rule
+is restated at system level in [chapter 13](../part3/13_system_design.qmd).
+
+:::
+
+---
+
+## What to remember
+
+- PLR ships no worklist support — that is the point. The seam is plain `csv` + `pathlib` + `lh.transfer`.
+- `csv.DictReader` gives rows as dicts; values are strings, cast before arithmetic.
+- Validate the parsed worklist before any tip moves; `get_free_volume()` answers "enough liquid?".
+- `sort_by_xy_and_chunk_by_x(targets, max_chunk_size)` turns wells into channel-parallel batches.
+- Results go back out as CSV (`get_used_volume()` per well).
+- **CSV for worklists, JSON for state, log lines for audit.** Three jobs, three formats.

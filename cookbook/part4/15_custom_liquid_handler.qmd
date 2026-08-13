@@ -1,0 +1,15 @@
+---
+title: "Define a custom liquid handler"
+---
+
+::: {.callout-note appearance="simple"}
+Not yet written. See `PLAN.md` §3 for this chapter's scope.
+:::
+
+**Planned recipes**
+
+- Read a minimal backend
+- Implement the six core methods
+- Refuse the seven you do not support
+- Wire up real transport
+- Design your error contract

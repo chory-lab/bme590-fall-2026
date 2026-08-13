@@ -1,0 +1,11 @@
+---
+title: "Cheat sheet"
+---
+
+::: {.callout-note appearance="simple"}
+Not yet written. See `PLAN.md` §3 for this chapter's scope.
+:::
+
+**Planned recipes**
+
+Flat lookup table: function, signature, one line.

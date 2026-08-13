@@ -1,0 +1,26 @@
+---
+title: "Recipe index"
+description: >
+  Every recipe in the book, indexed by task. Filter by keyword or sort by
+  chapter. Search matches the task text and the APIs each recipe uses.
+listing:
+  id: recipe-index
+  contents: recipes.yml
+  type: table
+  fields: [title, chapter, apis]
+  field-display-names:
+    title: "Task"
+    chapter: "Ch."
+    apis: "APIs used"
+  sort: ["chapter asc", "title asc"]
+  sort-ui: [title, chapter]
+  filter-ui: true
+  page-size: 60
+  categories: false
+---
+
+Recipes are indexed by **what you are trying to do**, not by which module the function lives in.
+If you know the API name but not the task, the [cheat sheet](CHEATSHEET.qmd) is the faster route.
+
+::: {#recipe-index}
+:::

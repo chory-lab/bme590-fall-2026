@@ -1,0 +1,13 @@
+---
+title: "When it complains"
+---
+
+::: {.callout-note appearance="simple"}
+Not yet written. See `PLAN.md` §3 for this chapter's scope.
+:::
+
+**Planned recipes**
+
+- The portable errors, and what each one means
+- Recover from a partial multichannel failure
+- Suppress tracking deliberately

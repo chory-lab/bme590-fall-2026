@@ -1,0 +1,367 @@
+---
+title: "Pipetting"
+subtitle: "The arguments that matter: speed, height, offsets, spread, and mix"
+---
+
+This is the most important chapter in Part I, and it is not about `aspirate` — it is about the
+*arguments*. Every real protocol is pipetting plus the modifiers that make it work: how fast, at
+what height, where inside the well, and which channels. Get these right and the call reads as
+intent; get them wrong and you have a protocol that silently under-fills, aerates, or crashes into
+the plate.
+
+## Setup {.unnumbered}
+
+```{python}
+#| label: cell-setup
+#| output: false
+from pylabrobot.liquid_handling import LiquidHandler
+from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+from pylabrobot.resources import (
+    STARLetDeck, PLT_CAR_L5AC_A00, cor_96_wellplate_360uL_Fb,
+    opentrons_96_filtertiprack_200ul, TIP_CAR_288_C00,
+    nest_1_troughplate_195000uL_Vb,
+)
+
+lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
+await lh.setup()
+
+carrier = PLT_CAR_L5AC_A00(name="carrier")
+lh.deck.assign_child_resource(carrier, rails=10)
+carrier[0] = plate = cor_96_wellplate_360uL_Fb(name="plate")
+
+tips = TIP_CAR_288_C00(name="tip_carrier")
+lh.deck.assign_child_resource(tips, rails=2)
+tips[0] = tip_rack = opentrons_96_filtertiprack_200ul(name="tips")
+
+trough = nest_1_troughplate_195000uL_Vb(name="buffer")
+carrier[1] = trough
+trough["A1"][0].set_volume(10000)          # a source that has liquid
+```
+
+::: {.column-margin}
+**Python you need here**
+
+Every recipe does a pick-up-then-pipette-then-drop cycle. The tip mechanics are the subject of
+[chapter 8](../part2/08_tips.qmd); here tips just *work*.
+:::
+
+---
+
+## Aspirate and dispense {#basics}
+
+::: {.recipe}
+
+### The task
+
+Move liquid from one well to another, with a tip on the head.
+
+```{python}
+#| label: cell-basics
+await lh.pick_up_tips(tip_rack["A1"])              # <1>
+await lh.aspirate(plate["A1"], vols=[50])          # <2>
+await lh.dispense(plate["B1"], vols=[50])          # <3>
+await lh.drop_tips(tip_rack["A1"])
+```
+
+1. One tip, one channel — the default mapping. `plate["A1"]` is always a list, matching `vols`.
+2. `aspirate(resources, vols)` pulls liquid *from* those wells into the tips.
+3. `dispense(resources, vols)` pushes it back out into the target wells.
+
+[**Why it works.** The two calls are the two halves of a transfer, and PLR tracks both halves:
+aspirating removes volume from the source well's tracker and adds it to the tip's; dispensing does
+the reverse. The chatterbox narration shows exactly what a real machine would do — one row per
+channel, one channel here.]{.why}
+
+::: {.callout-warning}
+## Gotcha: `vols` is a list, not a number
+
+`vols=[50]`, not `vols=50`. The length of `vols` must equal the number of channels used (here, the
+number of resources). A scalar raises `TypeError: 'int' object is not iterable`. The one place a
+scalar works is inside helpers like `transfer` — see [chapter 6](../part1/06_shortcuts.qmd).
+:::
+
+::: {.column-margin}
+**Python you need here**
+
+`None` as "backend default", not zero. `flow_rates=None` means *use the machine's default*;
+`flow_rates=0` means *stop the pump*. This trips up nearly everyone once, usually expensively.
+:::
+
+**See also:** `mix=` at the end of this chapter performs repeated aspirate/dispense cycles in one
+call.
+
+:::
+
+---
+
+## Control speed and height {#flow-height}
+
+::: {.recipe}
+
+### The task
+
+Pipette slowly and low, to avoid aerating a viscous liquid.
+
+```{python}
+#| label: cell-flow-height
+await lh.pick_up_tips(tip_rack["A2"])
+await lh.aspirate(
+    plate["A2"], vols=[80],
+    flow_rates=[50.0],                     # <1>
+    liquid_height=[2.0],                   # <2>
+    blow_out_air_volume=[10.0],            # <3>
+)
+await lh.dispense(
+    plate["B2"], vols=[80],
+    flow_rates=[80.0],
+    blow_out_air_volume=[10.0],
+)
+await lh.drop_tips(tip_rack["A2"])
+```
+
+1. `flow_rates` — µL/s per channel. A slow aspiration avoids disturbing the pellet or aerating the
+   liquid; a fast dispense mixes the target. Each is one value per channel.
+2. `liquid_height` — aspirate from 2 mm off the bottom, in mm, *not* from the surface. This is the
+   argument for "leave the pellet alone".
+3. `blow_out_air_volume` — µL of air dispensed after the liquid to clear the tip. `None` uses the
+   backend default; the value here is explicit.
+
+[**Why it works.** Every argument is per-channel and `None`-permissive: `None` defers to the
+backend's default, a number overrides it. The narration shows the resolved values — `flow rate`
+50.0, `blowout` 10.0, `lld_z` 2.0 — which is how you confirm the modifiers actually took. Note the
+`lld_z` column: that is `liquid_height`, the liquid-level-detection target.]{.why}
+
+::: {.callout-warning}
+## Gotcha: `liquid_height` is distance from the bottom, not a z-coordinate
+
+2.0 means "2 mm above the well bottom", whatever the well's total depth. It is not an absolute z.
+If you meant "near the surface of a 100 µL column", compute that from the volume first — chapter 14
+covers the volume↔height math.
+:::
+
+**See also:** `flow_rates`, `liquid_height`, and `blow_out_air_volume` accept per-channel lists so
+channels can behave differently; `use_channels` (below) is how you address a subset.
+
+:::
+
+---
+
+## Target a position within a well {#offsets}
+
+::: {.recipe}
+
+### The task
+
+Aspirate from the side wall of a well, or the last liquid in a corner — anywhere but dead center.
+
+```{python}
+#| label: cell-offsets
+from pylabrobot.resources import Coordinate
+
+await lh.pick_up_tips(tip_rack["A3"])
+await lh.aspirate(
+    plate["A3"], vols=[20],
+    offsets=[Coordinate(x=1.0, y=0, z=1.5)],    # <1>
+)
+await lh.drop_tips(tip_rack["A3"])
+```
+
+1. `offsets` shift each channel from the well center by a `Coordinate`. The z-component here keeps
+   the tip 1.5 mm off the bottom.
+
+```{python}
+#| eval: false
+well = plate["A3"][0]
+print("center:", well.center())                 # <1>
+print("anchor:", well.get_anchor(x="l", y="b")) # <2>
+```
+
+1. `center()` is where a channel goes by default — the origin for offsets.
+2. `get_anchor(x=..., y=..., z=...)` resolves named positions (`"l"`/`"r"`, `"f"`/`"b"`,
+   `"t"`/`"b"` for left/right, front/back, top/bottom). Compose them: `get_anchor(x="l", y="b")`
+   is the bottom-left corner.
+
+[**Why it works.** The default targeting is the well *center* at a backend-chosen height.
+`offsets` are applied relative to that center, so `Coordinate(1.0, 0, 1.5)` means "1 mm toward the
+side wall, 1.5 mm up". This is the mechanism behind every "don't touch the pellet" and "scrape the
+last drop" recipe — including the bead-magnet aspirate in [chapter 9](../part2/09_moving_labware.qmd#offset-aspirate).]{.why}
+
+::: {.callout-warning}
+## Gotcha: offsets are applied to the resolved target, not to the deck
+
+An offset moves a channel within the well it is already aimed at. It does not pick a different well
+and it is not an absolute coordinate — mixing those up drives tips into the plate between wells.
+:::
+
+**See also:** `get_anchor` and `Coordinate` also appear in [chapter 3](../part1/03_deck.qmd#locations),
+at the deck level.
+
+:::
+
+---
+
+## Aspirate from one trough with 8 channels {#spread}
+
+::: {.recipe}
+
+### The task
+
+Fill eight channels from a single 195 mL reservoir.
+
+```{python}
+#| label: cell-spread
+await lh.pick_up_tips(tip_rack["A1:H1"])                   # <1>
+
+w = trough["A1"][0]                                        # <2>
+
+await lh.aspirate(
+    [w] * 8,                                               # <3>
+    vols=[50] * 8,
+    use_channels=list(range(8)),
+    spread="wide",                                         # <4>
+)
+await lh.drop_tips(tip_rack["A1:H1"])
+```
+
+1. Eight tips for eight channels — the default pairing from [chapter 8](../part2/08_tips.qmd).
+2. `trough["A1"]` is a list of one well; `[0]` unwraps it. The trough is one big well, so all eight
+   channels share it.
+3. **The single-resource idiom:** repeat the resource once per channel. PLR sees
+   `len(set(resources)) == 1` and spaces the channels across it, computing per-channel offsets from
+   `spread`.
+4. `spread="wide"` puts channels as far apart as the trough allows (their spacing is `min_spacing`,
+   default 9 mm); `spread="tight"` pulls them as close as the machine allows. The third value,
+   `spread="custom"`, hands the placement back to you — supply `offsets` yourself, one per channel,
+   and PLR computes nothing. That is the escape hatch when neither automatic packing fits.
+
+[**Why it works.** The narration shows the payout: eight rows, all `buffer_well_A1`, with the
+`offset` column walking the channels across the trough's width (0, ±4.5, ±13.5, ±22.5, ±31.5 mm).
+The spread logic lives in `liquid_handling.channel_positioning.compute_channel_offsets` — the
+legacy `get_wide_/get_tight_single_resource_liquid_op_offsets` are deprecated wrappers over it.]{.why}
+
+::: {.callout-warning}
+## Gotcha: `vols` must match `use_channels`, even for one well
+
+`vols=[50] * 8` with `use_channels=list(range(8))`. Omit either and you get
+`ValueError: Length of vols must match length of use_channels`. There is no magic scalar for the
+multi-channel single-resource case.
+:::
+
+**See also:** `use_channels` also selects *which* channels act (e.g. `[0, 1, 2]` for a partial
+pick-up) — [chapter 6](../part1/06_shortcuts.qmd) and [chapter 8](../part2/08_tips.qmd) rely on it.
+
+:::
+
+---
+
+## Mix during a transfer {#mix}
+
+::: {.recipe}
+
+### The task
+
+Mix the contents of a well while you transfer, in one call.
+
+```{python}
+#| label: cell-mix
+from pylabrobot.liquid_handling.standard import Mix
+
+await lh.pick_up_tips(tip_rack["A4"])
+await lh.aspirate(
+    plate["A4"], vols=[100],
+    mix=[Mix(volume=80, repetitions=3, flow_rate=100.0,
+             surface_following_distance=2.0)],
+)
+await lh.dispense(
+    plate["B4"], vols=[100],
+    mix=[Mix(volume=80, repetitions=3, flow_rate=100.0)],
+)
+await lh.drop_tips(tip_rack["A4"])
+```
+
+[**Why it works.** `mix=` is **new in 0.2.2** and replaces the hand-rolled aspirate/dispense loops
+everyone used to write. `Mix(volume, repetitions, flow_rate, surface_following_distance)` tells the
+backend to aspirate `volume` µL, dispense it back, `repetitions` times, at `flow_rate`. PLR applies
+the mix around the transfer itself — a premix before aspirating the transfer volume, a postmix
+after dispensing it.]{.why}
+
+::: {.callout-warning}
+## Gotcha: the chatterbox does not narrate the mix cycles
+
+The narration shows the transfer volume, not the mix's internal cycles — a real backend performs
+them, but chatterbox prints the op it was given. Verify a mix with the machine or the run log
+([chapter 13](../part3/13_system_design.qmd)), not with the chatterbox output.
+:::
+
+**See also:** `surface_following_distance` tracks the liquid surface as it drops; pairing it with
+`liquid_height` from the speed/height recipe covers most cell-mixing use cases.
+
+:::
+
+---
+
+## When channels do not fit {#channel-spacing}
+
+::: {.recipe}
+
+### The task
+
+Understand why multi-channel operations refuse a well, and how to check the spacing.
+
+```{python}
+#| label: cell-channel-spacing
+await lh.pick_up_tips(tip_rack["A5:H5"])                       # <1>
+print("default spacings:", lh.backend.get_channel_spacings(list(range(8))))   # <2>
+
+small = plate["A5"][0]                                      # <3>
+try:
+    await lh.aspirate(
+        [small] * 8, vols=[10] * 8,
+        use_channels=list(range(8)), spread="wide",
+    )
+except ValueError as e:
+    print("refused:", e)                                    # <4>
+await lh.drop_tips(tip_rack["A5:H5"])
+```
+
+1. Eight tips for the eight channels being asked about — the refusal happens at planning, before
+   any tip moves.
+2. `get_channel_spacings` on the backend reports the physical channel spacing — 9 mm for a generic
+   head. That is the minimum centre-to-centre distance PLR will plan.
+3. A 96-well plate well is ~6.9 mm across. Eight channels at 9 mm spacing cannot fit in it.
+4. The refusal here is `ValueError: Resource is too small to space channels.` — spread can't pack
+   the channels into the well.
+
+[**Why it works.** PLR will never silently overlap channels. When a single resource is too small
+for the required spacing, it refuses the plan — before any tip moves. The rules get stricter when a
+well declares `no_go_zones` (blocked bands split the well into compartments); then the refusal is
+`ChannelsDoNotFitError: Cannot fit N channels into the compartments of '...'` instead. Two errors,
+one meaning: the geometry does not admit the plan.]{.why}
+
+::: {.callout-warning}
+## Gotcha: `ChannelsDoNotFitError` needs no-go zones
+
+On a plain well you get the `ValueError` above, not `ChannelsDoNotFitError`. The latter is raised
+specifically by the compartment algorithm when a well has `no_go_zones` set. Catch both if you are
+probing, or fix the plan: fewer channels, a wider resource, or `spread="custom"` with your own
+offsets.
+:::
+
+**See also:** `spread="custom"` in the `#spread` recipe — the escape hatch when the automatic
+packing cannot work but you know the exact offsets you want.
+
+:::
+
+---
+
+## What to remember
+
+- `vols` is a list, one entry per channel. `None` means backend default, never zero.
+- `flow_rates`, `liquid_height`, `blow_out_air_volume` are the three modifiers that make a call
+  real; `liquid_height` is from the bottom, in mm.
+- `offsets` move a channel within the aimed well — use `center()` / `get_anchor()` to compute them.
+- One resource + many channels means `[well] * n` + `use_channels` + `spread`; `spread` places the
+  channels and computes the offsets for you.
+- `mix=[Mix(...)]` replaces hand-rolled mixing loops.
+- Too many channels for a well: `ValueError` on plain wells, `ChannelsDoNotFitError` with
+  no-go zones. Check `get_channel_spacings` and plan accordingly.

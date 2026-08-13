@@ -1,0 +1,263 @@
+---
+title: "Standard labware"
+subtitle: "Reading names, finding parts, and searching the resource tree"
+---
+
+Before you can move liquid you have to name the things you move. PLR ships a large library of
+real labware — 26 vendor packages, 143 plate definitions at the time of writing — and this chapter
+is about navigating it: how the names are built, how to find the part you physically own, and how
+to look things up once they are on a deck.
+
+## Setup {.unnumbered}
+
+```{python}
+#| label: cell-setup
+#| output: false
+from pylabrobot.liquid_handling import LiquidHandler
+from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+from pylabrobot.resources import (
+    STARLetDeck, PLT_CAR_L5AC_A00,
+    cor_96_wellplate_360uL_Fb, nest_1_troughplate_195000uL_Vb,
+)
+
+lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
+await lh.setup()
+
+carrier = PLT_CAR_L5AC_A00(name="carrier")
+lh.deck.assign_child_resource(carrier, rails=10)
+carrier[0] = plate = cor_96_wellplate_360uL_Fb(name="sample_plate")
+carrier[1] = trough = nest_1_troughplate_195000uL_Vb(name="buffer")
+```
+
+::: {.column-margin}
+**Python you need here**
+
+`carrier[0] = plate` — the same `__setitem__` assignment you met in [chapter 1](../part1/01_robot_on_screen.qmd). It assigns the plate to the carrier's site 0.
+:::
+
+---
+
+## Decode a labware name {#naming}
+
+::: {.recipe}
+
+### The task
+
+Read `nest_1_troughplate_195000uL_Vb` and know, without looking it up, roughly what it is.
+
+The naming convention is a decoder ring. Every current name is built the same way:
+
+```text
+<vendor>_<count>_<type>_<volume>uL_<bottom>
+```
+
+Applied to the two definitions imported in the setup:
+
+```{python}
+#| label: cell-names
+for definition in (cor_96_wellplate_360uL_Fb, nest_1_troughplate_195000uL_Vb):
+    print("definition:", definition.__name__)          # <1>
+
+print("instance:", plate.name, "/", trough.name)       # <2>
+```
+
+1. The **definition name** is the factory function you imported — that is the name the convention
+   describes, and the one to decode.
+2. The **instance name** is whatever you passed as `name=`. It identifies this plate on this deck
+   and says nothing about what the labware is. Two different things, easy to conflate.
+
+- **vendor** — `cor` (Corning), `nest`, `opentrons`, `alpaqua`, `eppendorf`, ... One package per
+  vendor under `pylabrobot.resources`.
+- **count** — how many wells or reservoirs. `96`, `1`, `24`.
+- **type** — `wellplate`, `troughplate`, `filtertiprack`, `tuberack`, `plateadapter`, ...
+- **volume** — the well capacity in µL. `360uL`, `195000uL` (yes, that is 195 mL — a reservoir).
+- **bottom** — the well-bottom shape: `Fb` (flat), `Vb` (V-shaped), `U`/`Ub`. This is not cosmetic;
+  it drives the volume↔height math (chapter 14).
+
+[**Why it works.** The scheme is designed to be decoded, not memorized. `nest_1_troughplate_195000uL_Vb`
+reads "NEST, single-well trough, 195 mL, V-bottom" — which is exactly the object you hold. When a
+name breaks the pattern, the docstring usually says why.]{.why}
+
+::: {.callout-important}
+## The library is mid-rename — old names still import
+
+The convention above is the *current* one. Roughly ten vendor packages still carry old-style names
+as **deprecation shims** marked `# remove v1b1` in the source — e.g. `Cor_96_wellplate_360ul_Fb`
+(next to the current `cor_96_wellplate_360uL_Fb`). Both import and both work today.
+
+The catch: nothing about a shim tells you it is scheduled for deletion — no warning, no
+`DeprecationWarning`, just a name that quietly stops existing one release later. Prefer the
+snake_case current names whenever you have a choice. [Chapter 9](../part2/09_moving_labware.qmd#move-plate-to-magnet)
+shows one biting in practice.
+:::
+
+**See also:** `resources/diy/` — community 3D-printed labware, worth browsing even if you never
+print anything.
+
+:::
+
+---
+
+## Find a part by vendor and catalog number {#find-labware}
+
+::: {.recipe}
+
+### The task
+
+You physically own a Corning 3603 microplate. Which import is it?
+
+Every definition's docstring carries the manufacturer's catalog number. Ask the library:
+
+```{python}
+#| label: cell-find-labware
+print(cor_96_wellplate_360uL_Fb.__doc__.splitlines()[0])   # <1>
+```
+
+```{python}
+#| eval: false
+# grep the installed source for a catalog number you own:
+#   grep -rn "cat. no" pylabrobot/resources/corning/plates.py
+```
+
+1. The first line of the docstring is the catalog reference. The definition for `cor_96_wellplate_360uL_Fb`
+   opens with `Corning cat. no.s: 3603` — that is your plate. The full docstring also carries the
+   manufacturer link, distributor, material, and notes.
+
+[**Why it works.** The library is organized by vendor package, then by file (`plates.py`,
+`troughs.py`, `tip_racks.py`, ...), and each factory function documents the physical part it
+models. Catalog numbers live in the docstrings precisely so "I have a Corning 3603" can be
+answered by reading, not by memorizing.]{.why}
+
+::: {.callout-note}
+## What to do when the part is not there
+
+- **Grep the source** for the catalog number — it may be defined under a slightly different name.
+- **Use the closest definition** and note the difference in a comment. Nobody measures a well to
+  the micron.
+- **Define it yourself** — that is the subject of chapter 14, and 0.2.2 famously ships no PCR plate
+  at all, so the chapter builds one.
+:::
+
+**See also:** the vendor package list is `pylabrobot.resources.*` — 26 packages including the new-in-0.2.2
+`bioer`, `btx`, `diy`, `greiner`, `imcs`, and `perkin_elmer`. The old `corning_axygen`,
+`corning_costar`, `ml_star`, and `stanley` packages were consolidated into `corning`.
+
+:::
+
+---
+
+## Look up a resource by name {#get-resource}
+
+::: {.recipe}
+
+### The task
+
+Given a deck you did not build, find the plate called "sample_plate" — or fail loudly if it is not
+there.
+
+```{python}
+#| label: cell-get-resource
+plate = lh.deck.get_resource("sample_plate")      # <1>
+print("found:", plate.name, type(plate).__name__)
+
+# every well in the tree, in one flat list:
+wells = lh.deck.get_all_children()                # <2>
+print("total resources on deck:", len(wells))
+```
+
+1. `get_resource` walks the whole tree and returns the unique resource with that name.
+2. `get_all_children` flattens the tree — the same call used in [chapter 1](../part1/01_robot_on_screen.qmd#summary).
+
+```{python}
+#| eval: false
+try:
+    lh.deck.get_resource("no_such_plate")
+except Exception as e:
+    print(type(e).__name__, "-", e)
+```
+
+A missing name raises `ResourceNotFoundError: Resource with name 'no_such_plate' does not exist.`
+— one of the ~19 *portable* errors that raise identically on every backend ([chapter 10](../part2/10_errors.qmd)).
+
+[**Why it works.** Names are unique within a tree, and PLR *enforces* it: assigning a resource whose
+name already exists raises `ValueError: Resource 'sample_plate' already assigned to deck` at
+assignment time, before anything can go subtly wrong. Because uniqueness is guaranteed, a
+name lookup either finds the one right resource or raises.]{.why}
+
+::: {.callout-warning}
+## Gotcha: the tree is state, not a directory
+
+`get_resource` sees what PLR *thinks* is on the deck. Move a plate by hand and PLR still thinks it
+is where it was — which is exactly the off-deck bookkeeping problem in [chapter 9](../part2/09_moving_labware.qmd#off-deck-moves). A lookup is only as truthful as the model behind it.
+:::
+
+**See also:** `ResourceNotFoundError` is catalogued with the rest of the portable errors in
+[chapter 10](../part2/10_errors.qmd).
+
+:::
+
+---
+
+## Search the library {#query}
+
+::: {.recipe}
+
+### The task
+
+Filter a resource tree by type or by name pattern, in one call.
+
+```{python}
+#| label: cell-query
+from pylabrobot.resources import Well
+from pylabrobot.resources.utils import query
+
+all_wells = query(plate, type_=Well)          # <1>
+print(len(all_wells), "wells on the plate")
+
+a1 = query(plate, name=r".*_well_A1$")        # <2>
+print("A1:", [w.name for w in a1])
+```
+
+1. `query(root, type_=...)` returns every descendant of `root` that is an instance of `type_` —
+   here, all 96 wells of the plate.
+2. `name=` is a regular expression matched with `re.match`. Anchored at the start by `re.match`
+   semantics, so `.*_well_A1$` pins down exactly well A1 (the `$` matters — `.*_A1` alone also
+   matches A10, A11, A12).
+
+[**Why it works.** `query` walks the tree depth-first, appending every resource that passes the
+filters, and also supports `x`/`y`/`z` coordinate filters. It is the attribute-oriented complement
+to `get_resource`'s exact-name lookup.]{.why}
+
+::: {.callout-warning}
+## Gotcha: `query` prunes branches that do not match
+
+`query` only *descends into* nodes that themselves match the filters. Search the deck for wells
+and you get nothing, because the carriers above the wells do not match `type_=Well` and their
+subtrees are skipped:
+
+```{python}
+#| eval: false
+query(lh.deck, type_=Well)   # [] — the carrier branch is pruned before it reaches the wells
+```
+
+For a whole-deck search use `get_all_children()` plus Python filtering, or `get_resource` for a
+specific name. `query` is at its best on a *flat* collection like a plate's wells, or a carrier
+site's single plate.
+:::
+
+**See also:** `query`'s sibling helpers in `resources/utils.py` — `row_index_to_label`,
+`label_to_row_index`, and `sort_by_xy_and_chunk_by_x` appear in [chapter 4](../part1/04_indexing.qmd)
+and [chapter 7](../part2/07_worklists.qmd).
+
+:::
+
+---
+
+## What to remember
+
+- Names decode as `<vendor>_<count>_<type>_<volume>uL_<bottom>`. Read them, do not memorize them.
+- 26 vendor packages, 143 plates. Catalog numbers live in each definition's docstring.
+- Old-style names survive as `# remove v1b1` shims — they import and work, and nothing tells you.
+- Names are unique per deck, enforced at assignment time. `get_resource` is a safe lookup.
+- `query` filters by type/regex/coordinates but prunes non-matching branches — use it on flat
+  collections, not whole decks.

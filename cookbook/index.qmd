@@ -1,0 +1,57 @@
+---
+title: "The PyLabRobot Cookbook"
+---
+
+A task-indexed manual for [PyLabRobot](https://github.com/PyLabRobot/pylabrobot) **0.2.2**.
+
+If you know Python and have never used PLR, Parts I and II get you writing working protocols.
+Parts III and IV are for people building something that has to keep running.
+
+## How to read this
+
+- **[Recipe index](recipes.qmd)** — every recipe in the book, indexed by task and searchable by
+  the API it uses. This is the page to bookmark.
+- **[Cheat sheet](CHEATSHEET.qmd)** — flat lookup: function, signature, one line.
+- **Parts I–II** — broad coverage of PLR's everyday surface. Read straight through once.
+- **Part III** — the cross-cutting concerns: error recovery, logging, testing, data, config.
+- **Part IV** — two guided builds, start to finish, every step given.
+
+## Everything here runs without a robot
+
+Every snippet executes against `LiquidHandlerChatterboxBackend`, which simulates a liquid handler
+by narrating what it would do. Nothing in Parts I–III needs hardware.
+
+```{python}
+#| eval: false
+import pylabrobot
+print(pylabrobot.__version__)   # 0.2.2
+```
+
+::: {.callout-important}
+## This book targets 0.2.2 specifically
+
+PLR changes across minor versions, sometimes by deleting things. Liquid identity tracking and the
+cross-contamination tracker were removed before 0.2.2; the `main` branch has since moved the entire
+liquid handling stack under `pylabrobot.legacy` as part of the v1b1 migration.
+
+Recipes are written and executed against **0.2.2**. Pin it:
+
+```bash
+pip install "pylabrobot==0.2.2"
+```
+:::
+
+## Conventions
+
+| You will see | It means |
+|---|---|
+| A **Gotcha** warning callout | a way this bites people in practice |
+| An **important** callout | a conceptual point that changes how you read the rest |
+| A **Python you need here** margin note | the language feature the recipe leans on — skippable on a first read |
+| Numbered code annotations | hover or click the ① markers beside a line |
+
+::: {.callout-warning}
+## Gotcha
+
+Warning callouts look like this. Every one is a real failure mode, not a style note.
+:::

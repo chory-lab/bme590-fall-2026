@@ -1,0 +1,202 @@
+# Recipe registry — the source of the task-indexed listing on recipes.qmd.
+#
+# One entry per recipe. `path` deep-links to the recipe's anchor inside its
+# chapter, so recipes stay in narrative context while remaining individually
+# addressable. Adding a recipe means adding an entry here; the chapter itself
+# carries the content.
+#
+# Fields:
+#   title   - the task, phrased as the reader would search for it
+#   path    - chapter file + '#' + the recipe's {#anchor}
+#   chapter - integer, for sorting
+#   apis    - the PLR names the recipe uses, for keyword search
+
+- title: "Get a liquid handler running with no hardware"
+  path: part1/01_robot_on_screen.qmd#first-robot
+  chapter: 1
+  apis: "LiquidHandler, LiquidHandlerChatterboxBackend, STARLetDeck, setup, stop"
+
+- title: "Inspect what is on the deck"
+  path: part1/01_robot_on_screen.qmd#summary
+  chapter: 1
+  apis: "lh.summary, deck.get_all_children"
+
+- title: "See the deck"
+  path: part1/01_robot_on_screen.qmd#visualizer
+  chapter: 1
+  apis: "Visualizer, websocket, pylabrobot.visualizer"
+
+- title: "Simulate a whole workcell"
+  path: part1/01_robot_on_screen.qmd#workcell
+  chapter: 1
+  apis: "Thermocycler, ThermocyclerChatterboxBackend, Incubator, IncubatorChatterboxBackend, run_pcr_profile"
+
+- title: "Shut down cleanly"
+  path: part1/01_robot_on_screen.qmd#setup-stop
+  chapter: 1
+  apis: "LiquidHandler.setup, LiquidHandler.stop, async with, asyncio.run"
+
+- title: "Decode a labware name"
+  path: part1/02_standard_labware.qmd#naming
+  chapter: 2
+  apis: "nest_1_troughplate_195000uL_Vb, cor_96_wellplate_360uL_Fb, naming convention"
+
+- title: "Find a part by vendor and catalog number"
+  path: part1/02_standard_labware.qmd#find-labware
+  chapter: 2
+  apis: "docstring, catalog, corning, alpaqua"
+
+- title: "Look up a resource by name"
+  path: part1/02_standard_labware.qmd#get-resource
+  chapter: 2
+  apis: "Resource.get_resource, get_all_children, ResourceNotFoundError"
+
+- title: "Search the library"
+  path: part1/02_standard_labware.qmd#query
+  chapter: 2
+  apis: "resources.utils.query, regex"
+
+- title: "Build a deck from carriers"
+  path: part1/03_deck.qmd#build-deck
+  chapter: 3
+  apis: "assign_child_resource, rails, assign_child_at_slot, PlateCarrier, __setitem__"
+
+- title: "Where is this thing, really"
+  path: part1/03_deck.qmd#locations
+  chapter: 3
+  apis: "Resource.location, get_absolute_location, Coordinate"
+
+- title: "Will it fit"
+  path: part1/03_deck.qmd#collisions
+  chapter: 3
+  apis: "check_can_drop_resource_here, get_highest_known_point, ignore_collision"
+
+- title: "Rotate a plate"
+  path: part1/03_deck.qmd#rotation
+  chapter: 3
+  apis: "Resource.rotated, Rotation"
+
+- title: "Select wells"
+  path: part1/04_indexing.qmd#select
+  chapter: 4
+  apis: "__getitem__, get_item, get_items, slicing, plate[A1:H1]"
+
+- title: "Rows and columns"
+  path: part1/04_indexing.qmd#rows-cols
+  chapter: 4
+  apis: "ItemizedResource.row, ItemizedResource.column"
+
+- title: "Walk a plate in batches"
+  path: part1/04_indexing.qmd#traverse
+  chapter: 4
+  apis: "ItemizedResource.traverse, itertools.islice, snake"
+
+- title: "Map 96 wells into a 384-well quadrant"
+  path: part1/04_indexing.qmd#quadrant
+  chapter: 4
+  apis: "Plate.get_quadrant, checkerboard, block"
+
+- title: "Convert between labels and indices"
+  path: part1/04_indexing.qmd#labels
+  chapter: 4
+  apis: "row_index_to_label, label_to_row_index, split_identifier"
+
+- title: "Print an occupancy map"
+  path: part1/04_indexing.qmd#summary-map
+  chapter: 4
+  apis: "summary, occupied_func, get_used_volume, set_volume"
+
+- title: "Aspirate and dispense"
+  path: part1/05_pipetting.qmd#basics
+  chapter: 5
+  apis: "lh.aspirate, lh.dispense, Container"
+
+- title: "Control speed and height"
+  path: part1/05_pipetting.qmd#flow-height
+  chapter: 5
+  apis: "flow_rates, liquid_height, blow_out_air_volume"
+
+- title: "Target a position within a well"
+  path: part1/05_pipetting.qmd#offsets
+  chapter: 5
+  apis: "offsets, Coordinate, center, get_anchor"
+
+- title: "Aspirate from one trough with 8 channels"
+  path: part1/05_pipetting.qmd#spread
+  chapter: 5
+  apis: "spread, use_channels, compute_channel_offsets"
+
+- title: "Mix during a transfer"
+  path: part1/05_pipetting.qmd#mix
+  chapter: 5
+  apis: "Mix, mix, surface_following_distance"
+
+- title: "When channels do not fit"
+  path: part1/05_pipetting.qmd#channel-spacing
+  chapter: 5
+  apis: "ChannelsDoNotFitError, get_channel_spacings, no_go_zones"
+
+- title: "One call instead of twenty lines"
+  path: part1/06_shortcuts.qmd#transfer
+  chapter: 6
+  apis: "lh.transfer, source_vol, target_vols, ratios"
+
+- title: "Set default channels"
+  path: part1/06_shortcuts.qmd#use-channels
+  chapter: 6
+  apis: "lh.use_channels"
+
+- title: "96-head operations"
+  path: part1/06_shortcuts.qmd#head96
+  chapter: 6
+  apis: "aspirate96, dispense96, pick_up_tips96, drop_tips96"
+
+- title: "Drive a run from a CSV"
+  path: part2/07_worklists.qmd#csv-run
+  chapter: 7
+  apis: "csv, csv.DictReader, lh.transfer, worklist"
+
+- title: "Validate before moving a channel"
+  path: part2/07_worklists.qmd#validate
+  chapter: 7
+  apis: "validation, get_free_volume, worklist"
+
+- title: "Group rows into channel-parallel batches"
+  path: part2/07_worklists.qmd#batching
+  chapter: 7
+  apis: "sort_by_xy_and_chunk_by_x, batching, multi-channel"
+
+- title: "Write results back out"
+  path: part2/07_worklists.qmd#results
+  chapter: 7
+  apis: "csv, pathlib, get_used_volume, plate map"
+
+- title: "Pick a format"
+  path: part2/07_worklists.qmd#formats
+  chapter: 7
+  apis: "csv, json, logging, file formats"
+
+- title: "Move a plate to a carrier position"
+  path: part2/09_moving_labware.qmd#move-plate-to-carrier
+  chapter: 9
+  apis: "lh.move_plate, PlateCarrier"
+
+- title: "Take the lid off a plate and put it back"
+  path: part2/09_moving_labware.qmd#move-a-lid
+  chapter: 9
+  apis: "lh.move_lid, Liddable.has_lid, Lid"
+
+- title: "Move a plate onto a magnetic bead stand"
+  path: part2/09_moving_labware.qmd#move-plate-to-magnet
+  chapter: 9
+  apis: "lh.move_plate, PlateAdapter, alpaqua_96_plateadapter_magnum_flx"
+
+- title: "Take the top plate off a stack"
+  path: part2/09_moving_labware.qmd#plate-stacks
+  chapter: 9
+  apis: "ResourceStack.get_top_item, lh.move_plate"
+
+- title: "Tell PLR a plate moved while it was off-deck"
+  path: part2/09_moving_labware.qmd#off-deck-moves
+  chapter: 9
+  apis: "Resource.unassign, Resource.assign_child_resource"

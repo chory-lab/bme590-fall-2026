@@ -1,0 +1,15 @@
+---
+title: "Define custom labware: a PCR plate"
+---
+
+::: {.callout-note appearance="simple"}
+Not yet written. See `PLAN.md` §3 for this chapter's scope.
+:::
+
+**Planned recipes**
+
+- Measure a plate
+- Choose a base class
+- Lay out wells and define geometry
+- Make it sit at the right height
+- Contribute it upstream
