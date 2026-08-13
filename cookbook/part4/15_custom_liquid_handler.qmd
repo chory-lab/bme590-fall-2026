@@ -363,12 +363,137 @@ async def _goto(self, resource, offset: Coordinate):
 
 1. Measured once for the instrument, not derived from anything PLR knows.
 
-**A deck of your own.**
+:::
 
-A machine with a different layout wants a `Deck` subclass, in the way `STARLetDeck` and `OTDeck`
-differ ([chapter 3](../part1/03_deck.qmd#build-deck)): `STARLetDeck` takes `rails`, `OTDeck` takes
-`assign_child_at_slot(slot=)`. A `Deck` subclass defines its own positioning method and the
-locations it maps to.
+---
+
+## Step 8: Define the deck {#deck}
+
+::: {.recipe}
+
+A backend and a deck go together: the backend converts deck coordinates into motor commands, and
+the deck decides what those coordinates are. `STARLetDeck` positions by `rails=`; `OTDeck`
+positions by `assign_child_at_slot(slot=)` ([chapter 3](../part1/03_deck.qmd#build-deck)). A machine
+with its own layout needs its own `Deck` subclass.
+
+This one is modelled on `OTDeck`: a grid of slots, each backed by a `ResourceHolder`.
+
+```{python}
+#| label: cell-deck
+from typing import List, Optional
+from pylabrobot.resources import Deck, Resource, ResourceHolder, Coordinate
+
+SLOT_SIZE_X, SLOT_SIZE_Y = 128.0, 86.0     # <1>
+SLOT_PITCH_X, SLOT_PITCH_Y = 132.5, 90.5   # <2>
+
+
+class GantryDeck(Deck):
+    NUM_X, NUM_Y = 2, 3
+
+    def __init__(self, name: str = "gantry_deck"):
+        super().__init__(
+            name=name,
+            size_x=SLOT_PITCH_X * self.NUM_X,
+            size_y=SLOT_PITCH_Y * self.NUM_Y,
+            size_z=0,
+        )
+        self._slots: List[ResourceHolder] = []
+        for i in range(self.NUM_X * self.NUM_Y):
+            row, col = divmod(i, self.NUM_X)
+            holder = ResourceHolder(                       # <3>
+                name=f"{name}_slot_{i + 1}",
+                size_x=SLOT_SIZE_X, size_y=SLOT_SIZE_Y, size_z=0,
+            )
+            self._slots.append(holder)
+            super().assign_child_resource(                 # <4>
+                holder,
+                location=Coordinate(x=col * SLOT_PITCH_X, y=row * SLOT_PITCH_Y, z=0),
+            )
+
+    def assign_child_at_slot(self, resource: Resource, slot: int):   # <5>
+        if slot not in range(1, len(self._slots) + 1):
+            raise ValueError(f"slot must be between 1 and {len(self._slots)}")
+        holder = self._slots[slot - 1]
+        if holder.resource is not None:
+            raise ValueError(f"slot {slot} is already occupied")
+        holder.assign_child_resource(resource)
+
+    def get_slot(self, resource: Resource) -> Optional[int]:
+        for i, holder in enumerate(self._slots):
+            if holder.resource is resource:
+                return i + 1
+        return None
+
+    @property
+    def slots(self) -> List[Optional[Resource]]:
+        return [h.resource for h in self._slots]
+
+
+deck = GantryDeck()
+print("deck:", deck.get_size_x(), "x", deck.get_size_y(), "mm |", len(deck.slots), "slots")
+```
+
+1. The labware footprint a slot accepts — an SBS plate is 127.76 × 85.48 mm.
+2. Centre-to-centre slot spacing, which is larger than the footprint by the gap between slots.
+3. One `ResourceHolder` per slot, created in `__init__`. The holders are the deck's geometry, so
+   there is a single source of truth and the layout serializes with the tree.
+4. `super().assign_child_resource` places the *holder*. Calling the subclass's own method here
+   would recurse.
+5. The positioning method. `rails=` and `slot=` are both this: a machine-specific name for a
+   position, resolved to a `Coordinate`.
+
+Slots resolve to absolute positions, and labware lands where the slot says:
+
+```{python}
+#| label: cell-deck-use
+from pylabrobot.resources import cor_96_wellplate_360uL_Fb, opentrons_96_filtertiprack_200ul
+
+plate = cor_96_wellplate_360uL_Fb(name="deck_plate")
+rack = opentrons_96_filtertiprack_200ul(name="deck_rack")
+
+deck.assign_child_at_slot(plate, slot=1)
+deck.assign_child_at_slot(rack, slot=4)
+
+print("plate:", plate.get_absolute_location())
+print("rack: ", rack.get_absolute_location())
+print("plate is in slot", deck.get_slot(plate))
+print("occupied slots:", [i + 1 for i, r in enumerate(deck.slots) if r is not None])
+print("well A1:", plate.get_item("A1").get_absolute_location())   # <1>
+```
+
+1. Well coordinates compose through the slot holder, so the backend's `get_absolute_location()`
+   works unchanged ([chapter 3](../part1/03_deck.qmd#locations)).
+
+Both failure modes raise from `assign_child_at_slot`:
+
+```{python}
+#| label: cell-deck-errors
+for slot in (1, 9):
+    try:
+        deck.assign_child_at_slot(cor_96_wellplate_360uL_Fb(name=f"extra_{slot}"), slot=slot)
+    except ValueError as e:
+        print(f"slot {slot}: {e}")
+```
+
+The deck goes to `LiquidHandler` in place of `STARLetDeck`, and the backend from step 3 needs no
+change:
+
+```{python}
+#| label: cell-deck-lh
+lh_gantry = LiquidHandler(backend=GantryBackend(FakeGantry()), deck=GantryDeck())
+await lh_gantry.setup()
+
+sample = cor_96_wellplate_360uL_Fb(name="sample")
+lh_gantry.deck.assign_child_at_slot(sample, slot=2)
+print("on the gantry deck:", sample.get_absolute_location())
+print("serializes as:", lh_gantry.deck.serialize()["type"])      # <1>
+```
+
+1. The class name is what `find_subclass` resolves on load, so a saved layout needs `GantryDeck`
+   imported before `load_from_json_file` ([chapter 11](../part2/11_state.qmd#find-subclass)).
+
+**See also:** `resources/hamilton/hamilton_decks.py` and `resources/opentrons/deck.py` are the two
+shipped implementations to compare — rails against slots.
 
 :::
 
@@ -397,3 +522,5 @@ locations it maps to.
   `NotImplementedError`, unless the backend sets `_head96_installed = True`.
 - Build on `pylabrobot.io` rather than raw `pyserial`: it is what makes capture and replay work.
 - Homing at `setup()` is what makes absolute coordinates mean anything.
+- A machine with its own layout needs a `Deck` subclass: hold one `ResourceHolder` per position and
+  give it a positioning method, the way `rails=` and `slot=` work.

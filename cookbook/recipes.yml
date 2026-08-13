@@ -405,3 +405,8 @@
   path: part4/15_custom_liquid_handler.qmd#coordinates
   chapter: 15
   apis: "get_absolute_location, Coordinate, homing, Deck subclass, assign_child_at_slot"
+
+- title: "Define a custom deck"
+  path: part4/15_custom_liquid_handler.qmd#deck
+  chapter: 15
+  apis: "Deck, ResourceHolder, assign_child_at_slot, OTDeck, STARLetDeck, get_slot, Coordinate"
