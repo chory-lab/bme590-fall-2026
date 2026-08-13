@@ -1,15 +1,454 @@
 ---
 title: "Define a custom liquid handler"
+subtitle: "Fourteen abstract members, six of them real work"
 ---
 
-::: {.callout-note appearance="simple"}
-Not yet written. See `PLAN.md` §3 for this chapter's scope.
+This chapter builds a working `LiquidHandlerBackend` for a single-channel gantry: a machine with one
+pipetting channel, no 96-head, and no gripper. Every step is given. At the end the backend drives a
+real `LiquidHandler` — tip tracking, volume tracking, and all the frontend checks — and emits
+commands to a device.
+
+The scope is smaller than it looks. `LiquidHandlerBackend` declares 14 abstract members; **six of
+them are the machine**, and the other eight are declarations of what you do not support.
+
+## Setup {.unnumbered}
+
+```{python}
+#| label: cell-setup
+#| output: false
+from typing import List
+
+from pylabrobot.liquid_handling import LiquidHandler
+from pylabrobot.liquid_handling.backends import LiquidHandlerBackend
+from pylabrobot.liquid_handling.standard import (
+    Pickup, Drop, SingleChannelAspiration, SingleChannelDispense,
+)
+from pylabrobot.resources import (
+    STARLetDeck, PLT_CAR_L5AC_A00, cor_96_wellplate_360uL_Fb,
+    TIP_CAR_288_C00, opentrons_96_filtertiprack_200ul,
+    Tip, Coordinate, set_volume_tracking,
+)
+```
+
+---
+
+## Step 1: Read the smallest complete backend {#read-chatterbox}
+
+::: {.recipe}
+
+### The task
+
+Start from a backend that already works.
+
+`pylabrobot/liquid_handling/backends/chatterbox.py` is **242 lines** and is a complete, correct
+implementation of the interface: every abstract member present, every operation handled. It prints
+instead of moving, which is the only thing separating it from a driver.
+
+Read it before writing anything. The two things to take from it are the shape of each method —
+`async def aspirate(self, ops, use_channels)` — and the fact that a backend receives **lists of
+operation objects**, not the arguments the caller passed to `lh.aspirate`.
+
+[**Why it works.** The frontend resolves resources to positions, checks trackers, and packages each
+channel's work into a dataclass. By the time the backend is called, the decisions are made; the
+backend's job is to turn already-validated operations into device commands.]{.why}
+
 :::
 
-**Planned recipes**
+---
 
-- Read a minimal backend
-- Implement the six core methods
-- Refuse the seven you do not support
-- Wire up real transport
-- Design your error contract
+## Step 2: See what the interface demands {#abstract-members}
+
+::: {.recipe}
+
+### The task
+
+List what must be implemented, and what happens if it is not.
+
+```{python}
+#| label: cell-abstract
+print(len(LiquidHandlerBackend.__abstractmethods__), "abstract members:")
+for m in sorted(LiquidHandlerBackend.__abstractmethods__):
+    print("  ", m)
+```
+
+They tier:
+
+| Tier | Members | This build |
+|---|---|---|
+| Core | `num_channels`, `can_pick_up_tip`, `pick_up_tips`, `drop_tips`, `aspirate`, `dispense` | implement — 6 |
+| Lifecycle | `stop` | implement — 1 |
+| 96-head | `pick_up_tips96`, `drop_tips96`, `aspirate96`, `dispense96` | refuse — 4 |
+| Gripper | `pick_up_resource`, `move_picked_up_resource`, `drop_resource` | refuse — 3 |
+
+```{python}
+#| label: cell-abc-refuses
+class Incomplete(LiquidHandlerBackend):
+    pass
+
+try:
+    Incomplete()                                   # <1>
+except TypeError as e:
+    print("TypeError:", str(e)[:170])
+```
+
+1. Python refuses to instantiate a class with unimplemented abstract methods.
+
+[**Why it works.** `LiquidHandlerBackend` is an ABC, so the abstract set is a checklist enforced at
+construction. A backend cannot silently omit a capability — it has to say something for each of the
+14, even if what it says is "not supported".]{.why}
+
+::: {.callout-note}
+## `setup` is not abstract, `stop` is
+
+`stop` is on the list; `setup` is not. The base class provides a `setup` that asserts a deck has
+been set, so an override should call `await super().setup()` before touching hardware. There is no
+default `stop`.
+:::
+
+::: {.callout-note}
+## Members with defaults you may override
+
+Not abstract, and already implemented: `move_channel_x/y/z`,
+`prepare_for_manual_channel_operation`, and `request_tip_presence` all raise `NotImplementedError`
+([chapter 12](../part2/12_hardware.qmd#jog)), and `get_channel_spacings` returns a generic
+occupancy diameter for every channel. Override the ones your machine can do.
+:::
+
+:::
+
+---
+
+## Step 3: Implement the core six {#core}
+
+::: {.recipe}
+
+### The task
+
+Write the methods that are the machine.
+
+```{python}
+#| label: cell-device
+class FakeGantry:                                   # <1>
+    def __init__(self):
+        self.sent: List[str] = []
+
+    async def send(self, command: str) -> str:
+        self.sent.append(command)
+        return "ok"
+```
+
+1. Stands in for the transport, so this chapter runs. Step 6 replaces it.
+
+```{python}
+#| label: cell-core
+class GantryBackend(LiquidHandlerBackend):
+    def __init__(self, device: FakeGantry):
+        super().__init__()                          # <1>
+        self.device = device
+
+    @property
+    def num_channels(self) -> int:                  # <2>
+        return 1
+
+    def can_pick_up_tip(self, channel_idx: int, tip: Tip) -> bool:   # <3>
+        return tip.maximal_volume <= 200
+
+    async def _goto(self, resource, offset: Coordinate):             # <4>
+        loc = resource.get_absolute_location() + offset
+        await self.device.send(f"MOVE X{loc.x:.2f} Y{loc.y:.2f} Z{loc.z:.2f}")
+
+    async def pick_up_tips(self, ops: List[Pickup], use_channels: List[int]):
+        for op in ops:                              # <5>
+            await self._goto(op.resource, op.offset)
+            await self.device.send("TIP ON")
+
+    async def drop_tips(self, ops: List[Drop], use_channels: List[int]):
+        for op in ops:
+            await self._goto(op.resource, op.offset)
+            await self.device.send("TIP OFF")
+
+    async def aspirate(self, ops: List[SingleChannelAspiration], use_channels: List[int]):
+        for op in ops:
+            await self._goto(op.resource, op.offset)
+            rate = op.flow_rate if op.flow_rate is not None else 100.0   # <6>
+            await self.device.send(f"ASP {op.volume:.1f} RATE {rate:.1f}")
+
+    async def dispense(self, ops: List[SingleChannelDispense], use_channels: List[int]):
+        for op in ops:
+            await self._goto(op.resource, op.offset)
+            rate = op.flow_rate if op.flow_rate is not None else 100.0
+            await self.device.send(f"DIS {op.volume:.1f} RATE {rate:.1f}")
+
+    async def setup(self):                          # <7>
+        await super().setup()
+        await self.device.send("HOME")
+
+    async def stop(self):
+        await self.device.send("PARK")
+
+    # --- capabilities this machine does not have ---------------------
+    async def pick_up_tips96(self, pickup):
+        raise NotImplementedError("single-channel gantry: no 96-head")
+
+    async def drop_tips96(self, drop):
+        raise NotImplementedError("single-channel gantry: no 96-head")
+
+    async def aspirate96(self, aspiration):
+        raise NotImplementedError("single-channel gantry: no 96-head")
+
+    async def dispense96(self, dispense):
+        raise NotImplementedError("single-channel gantry: no 96-head")
+
+    async def pick_up_resource(self, pickup):
+        raise NotImplementedError("single-channel gantry: no gripper")
+
+    async def move_picked_up_resource(self, move):
+        raise NotImplementedError("single-channel gantry: no gripper")
+
+    async def drop_resource(self, drop):
+        raise NotImplementedError("single-channel gantry: no gripper")
+
+print("defined:", GantryBackend.__name__)
+```
+
+1. `super().__init__()` sets up the base state, including `_head96_installed = False`.
+2. A property, not a method. The frontend reads it to size `lh.head`.
+3. Called before a pick-up. Returning `False` is how a channel declines a tip it cannot fit.
+4. Not part of the interface — a helper. `get_absolute_location()` plus the op's offset is the
+   coordinate ([chapter 3](../part1/03_deck.qmd#locations)).
+5. `ops` is a list with one entry per channel in `use_channels`. A one-channel machine gets one.
+6. `None` means "backend default" ([chapter 5](../part1/05_pipetting.qmd#basics)) — the backend is
+   what supplies that default.
+7. `super().setup()` asserts a deck is set before the device is touched.
+
+Each operation carries what the backend needs:
+
+| Op | Fields |
+|---|---|
+| `Pickup` / `Drop` | `resource`, `offset`, `tip` |
+| `SingleChannelAspiration` / `SingleChannelDispense` | `resource`, `offset`, `tip`, `volume`, `flow_rate`, `liquid_height`, `blow_out_air_volume`, `mix` |
+
+[**Why it works.** All the operation dataclasses are `frozen=True`, so a backend cannot alter the
+plan it was handed. It reads the fields and emits commands.]{.why}
+
+:::
+
+---
+
+## Step 4: Run a protocol through it {#run}
+
+::: {.recipe}
+
+### The task
+
+Drive the backend with an ordinary `LiquidHandler` and watch the device traffic.
+
+```{python}
+#| label: cell-run
+device = FakeGantry()
+lh = LiquidHandler(backend=GantryBackend(device), deck=STARLetDeck())
+await lh.setup()
+print("channels:", len(lh.head))                    # <1>
+
+carrier = PLT_CAR_L5AC_A00(name="carrier")
+lh.deck.assign_child_resource(carrier, rails=10)
+carrier[0] = plate = cor_96_wellplate_360uL_Fb(name="plate")
+tips = TIP_CAR_288_C00(name="tip_carrier")
+lh.deck.assign_child_resource(tips, rails=2)
+tips[0] = rack = opentrons_96_filtertiprack_200ul(name="rack")
+
+set_volume_tracking(True)
+plate["A1"][0].set_volume(200)
+
+await lh.pick_up_tips(rack["A1"])
+await lh.aspirate(plate["A1"], vols=[50], flow_rates=[75.0])   # <2>
+await lh.dispense(plate["B1"], vols=[50])                      # <3>
+await lh.drop_tips(rack["A1"])
+await lh.stop()
+
+print("\ndevice received:")
+for command in device.sent:
+    print("  ", command)
+```
+
+1. Sized from `num_channels`.
+2. An explicit flow rate reaches the device as `RATE 75.0`.
+3. No flow rate given, so the backend's own default appears instead.
+
+[**Why it works.** Everything in Parts I–III applies unchanged. The frontend tracked volumes and
+tips, resolved `plate["A1"]` to a coordinate, and refused anything invalid before your code ran —
+the backend only had to move and pipette.]{.why}
+
+:::
+
+---
+
+## Step 5: Declare what you cannot do {#refuse}
+
+::: {.recipe}
+
+### The task
+
+Understand what a caller sees when they ask for a capability the machine lacks.
+
+```{python}
+#| label: cell-refuse
+lh2 = LiquidHandler(backend=GantryBackend(FakeGantry()), deck=STARLetDeck())
+await lh2.setup()
+tc = TIP_CAR_288_C00(name="tc2")
+lh2.deck.assign_child_resource(tc, rails=2)
+tc[0] = rack2 = opentrons_96_filtertiprack_200ul(name="rack2")
+
+try:
+    await lh2.pick_up_tips96(rack2)                 # <1>
+except (NotImplementedError, KeyError) as e:
+    print(f"{type(e).__name__}: {e}")
+```
+
+1. The backend raises `NotImplementedError` — but that is not what surfaces.
+
+::: {.callout-warning}
+## Gotcha: the 96-head methods are not reached
+
+`LiquidHandler.__init__` builds `head96` only when the backend reports
+`head96_installed`, which defaults to `False`. `pick_up_tips96` indexes that empty dict before
+calling the backend, so the caller gets a bare **`KeyError: 0`** rather than the
+`NotImplementedError` the backend carefully raises.
+
+A backend that does have a 96-head sets `self._head96_installed = True` in `__init__`, which is what
+makes the frontend build the head and route the call through.
+:::
+
+[**Why it works.** Two different mechanisms are in play. The ABC forces you to *write* something for
+all 14 members, which is a compile-time-ish guarantee about the class. Whether a call reaches your
+method is a separate, runtime question, decided by the frontend from the capabilities the backend
+advertises.]{.why}
+
+**See also:** `NotImplementedError` with an empty message is what the generic chatterbox raises for
+the jog methods ([chapter 12](../part2/12_hardware.qmd#jog)) — a message costs nothing and is worth
+supplying.
+
+:::
+
+---
+
+## Step 6: Talk to a real device {#io}
+
+::: {.recipe}
+
+### The task
+
+Replace `FakeGantry` with a transport.
+
+`pylabrobot.io` provides `serial`, `usb`, `hid`, `ftdi`, and `socket`:
+
+```{python}
+#| eval: false
+from pylabrobot.io.serial import Serial
+
+class GantryBackend(LiquidHandlerBackend):
+    def __init__(self, port: str):
+        super().__init__()
+        self.io = Serial(                            # <1>
+            human_readable_device_name="gantry",
+            port=port,
+            baudrate=115200,
+            timeout=1,
+        )
+
+    async def setup(self):
+        await super().setup()
+        await self.io.setup()                        # <2>
+        await self.io.write(b"HOME\n")
+
+    async def stop(self):
+        await self.io.write(b"PARK\n")
+        await self.io.stop()
+```
+
+1. `Serial` wraps pyserial and takes the same parameters — `port`, `baudrate`, `bytesize`,
+   `parity`, `stopbits`, `timeout`, `rtscts`, `dsrdtr`.
+2. The transport has its own `setup`/`stop`, nested inside the backend's.
+
+[**Why it works.** These wrappers call `capturer.record` on every read and write. That is what makes
+`start_capture` / `validate` work ([chapter 13](../part3/13_system_design.qmd#testing)) — a backend
+built on raw `pyserial` is invisible to capture, and cannot be replay-tested. The wrappers also log
+at `LOG_LEVEL_IO`, so device traffic appears in the run record alongside the frontend's
+calls.]{.why}
+
+:::
+
+---
+
+## Step 7: Coordinate frames and homing {#coordinates}
+
+::: {.recipe}
+
+### The task
+
+Get from PLR's coordinates to the machine's.
+
+PLR gives the backend deck coordinates in millimetres:
+`resource.get_absolute_location() + op.offset`, with the deck origin at its own front-left-bottom
+([chapter 3](../part1/03_deck.qmd#locations)).
+
+Three things stand between that and a motor command, and none is free:
+
+1. **Origin.** The machine's zero and the deck's origin are different points. The offset between
+   them is a constant you measure once, per instrument.
+2. **Axis direction and units.** A machine whose y increases toward the back, or which counts in
+   steps rather than millimetres, needs the conversion applied in the backend.
+3. **Homing.** `get_absolute_location()` is meaningful only if the machine agrees where zero is,
+   which means homing at `setup()` — the `HOME` command in step 3 — and after any event that can
+   lose position.
+
+```{python}
+#| eval: false
+DECK_ORIGIN_IN_MACHINE = Coordinate(x=12.5, y=8.0, z=0.0)   # <1>
+STEPS_PER_MM = 80
+
+async def _goto(self, resource, offset: Coordinate):
+    loc = resource.get_absolute_location() + offset + DECK_ORIGIN_IN_MACHINE
+    await self.io.write(
+        f"MOVE X{int(loc.x * STEPS_PER_MM)} Y{int(loc.y * STEPS_PER_MM)}\n".encode()
+    )
+```
+
+1. Measured once for the instrument, not derived from anything PLR knows.
+
+::: {.callout-note}
+## A deck of your own
+
+A machine with a different layout wants a `Deck` subclass, in the way `STARLetDeck` and `OTDeck`
+differ ([chapter 3](../part1/03_deck.qmd#build-deck)): `STARLetDeck` takes `rails`, `OTDeck` takes
+`assign_child_at_slot(slot=)`. A `Deck` subclass defines its own positioning method and the
+locations it maps to.
+:::
+
+:::
+
+---
+
+## What the interface guarantees
+
+- **The ABC is the capability declaration.** All 14 members must exist before Python will
+  instantiate the class, so a backend cannot accidentally omit one. What it *cannot* enforce is
+  correctness: an `aspirate` that pipettes the wrong volume satisfies the interface.
+- **The frontend owns validation, the backend owns motion.** Tracking, resource resolution, and
+  argument checking happen before your code runs — which is why a protocol written against the
+  chatterbox works against a new backend unchanged.
+- **Capability advertisement is separate from implementation.** The ABC decides what you must
+  write; flags like `head96_installed` decide what the frontend will call.
+
+## What to remember
+
+- 14 abstract members: 6 core, 1 lifecycle (`stop`), 4 for the 96-head, 3 for the gripper. `setup`
+  is not abstract; override it and call `await super().setup()`.
+- Backends receive **lists of frozen operation dataclasses**, one per channel — not the caller's
+  arguments.
+- `num_channels` is a property. `can_pick_up_tip` returning `False` declines a tip.
+- `flow_rate=None` means the backend supplies the default.
+- Unsupported 96-head calls surface as `KeyError: 0` from the frontend, not your
+  `NotImplementedError`, unless the backend sets `_head96_installed = True`.
+- Build on `pylabrobot.io` rather than raw `pyserial`: it is what makes capture and replay work.
+- Homing at `setup()` is what makes absolute coordinates mean anything.

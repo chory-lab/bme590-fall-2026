@@ -370,3 +370,38 @@
   path: part4/14_custom_labware.qmd#contribute
   chapter: 14
   apis: "resources vendor package, __init__ exports, contributing-new-resources"
+
+- title: "Read the smallest complete backend"
+  path: part4/15_custom_liquid_handler.qmd#read-chatterbox
+  chapter: 15
+  apis: "LiquidHandlerChatterboxBackend, backends/chatterbox.py"
+
+- title: "See what the backend interface demands"
+  path: part4/15_custom_liquid_handler.qmd#abstract-members
+  chapter: 15
+  apis: "LiquidHandlerBackend, __abstractmethods__, abstractmethod, ABC, setup, stop, get_channel_spacings, request_tip_presence"
+
+- title: "Implement the core backend methods"
+  path: part4/15_custom_liquid_handler.qmd#core
+  chapter: 15
+  apis: "num_channels, can_pick_up_tip, pick_up_tips, drop_tips, aspirate, dispense, Pickup, Drop, SingleChannelAspiration, SingleChannelDispense"
+
+- title: "Run a protocol through a custom backend"
+  path: part4/15_custom_liquid_handler.qmd#run
+  chapter: 15
+  apis: "LiquidHandler, lh.head, set_volume_tracking, custom backend"
+
+- title: "Declare capabilities a backend lacks"
+  path: part4/15_custom_liquid_handler.qmd#refuse
+  chapter: 15
+  apis: "NotImplementedError, head96_installed, pick_up_tips96, pick_up_resource, move_picked_up_resource, drop_resource"
+
+- title: "Talk to a real device over pylabrobot.io"
+  path: part4/15_custom_liquid_handler.qmd#io
+  chapter: 15
+  apis: "pylabrobot.io, Serial, USB, HID, FTDI, Socket, LOG_LEVEL_IO, capturer.record"
+
+- title: "Map deck coordinates to machine coordinates"
+  path: part4/15_custom_liquid_handler.qmd#coordinates
+  chapter: 15
+  apis: "get_absolute_location, Coordinate, homing, Deck subclass, assign_child_at_slot"
