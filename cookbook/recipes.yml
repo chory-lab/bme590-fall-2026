@@ -225,3 +225,28 @@
   path: part2/10_errors.qmd#dead-errors
   chapter: 10
   apis: "CrossContaminationError, set_cross_contamination_tracking, liquid_history"
+
+- title: "Drop, return, or discard"
+  path: part2/08_tips.qmd#drop-return-discard
+  chapter: 8
+  apis: "lh.drop_tips, lh.return_tips, lh.discard_tips, allow_nonzero_volume, return_tips96, discard_tips96, deck.get_trash_area"
+
+- title: "Scope tips to a block"
+  path: part2/08_tips.qmd#use-tips
+  chapter: 8
+  apis: "lh.use_tips, lh.get_mounted_tips, asynccontextmanager"
+
+- title: "Stream tips across several racks"
+  path: part2/08_tips.qmd#stream-tips
+  chapter: 8
+  apis: "F.get_all_tip_spots, F.linear_tip_spot_generator, F.randomized_tip_spot_generator, cache_file_path, get_num_tips_left, set_index, resources.functional"
+
+- title: "Set what the rack model believes"
+  path: part2/08_tips.qmd#rack-state
+  chapter: 8
+  apis: "TipRack.empty, TipRack.fill, TipRack.set_tip_state, TipRack.disable_tip_trackers, TipSpot.has_tip, set_tip_tracking"
+
+- title: "Probe and consolidate tip inventory"
+  path: part2/08_tips.qmd#probe-consolidate
+  chapter: 8
+  apis: "lh.probe_tip_inventory, lh.probe_tip_presence_via_pickup, lh.consolidate_tip_inventory, lh.move_tips"

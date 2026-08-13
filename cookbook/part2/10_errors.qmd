@@ -295,10 +295,56 @@ print("after: ", does_volume_tracking())          # <3>
 
 1. A context manager, not a flag to reset by hand.
 2. D1 was never filled. With tracking on this raises `TooLittleLiquidError`.
-3. Restored on exit, including when the block raises.
+3. Restored when the block exits normally — but see the gotcha below.
 
-[**Why it works.** The trackers read one module-level flag. `no_volume_tracking()` saves it, clears
-it, and restores it in a `finally`. `no_tip_tracking()` does the same for the tip trackers.]{.why}
+[**Why it works.** The trackers read one module-level flag. `no_volume_tracking()` saves the flag,
+clears it, yields, then restores it. `no_tip_tracking()` does the same for the tip trackers.]{.why}
+
+::: {.callout-warning}
+## Gotcha: an exception inside the block leaves tracking off
+
+Neither context manager wraps its `yield` in `try`/`finally`:
+
+```python
+@contextlib.contextmanager
+def no_volume_tracking():
+  old_value = this.volume_tracking_enabled
+  this.volume_tracking_enabled = False
+  yield                                       # <-- an exception here skips the line below
+  this.volume_tracking_enabled = old_value
+```
+
+If the body raises, the restore never runs and volume tracking stays **off for the rest of the
+session**, including in code that never asked to suppress it:
+
+```{python}
+#| label: cell-tracking-leak
+try:
+    with no_volume_tracking():
+        raise ValueError("something failed mid-block")
+except ValueError:
+    pass
+
+print("volume tracking still on?", does_volume_tracking())
+
+set_volume_tracking(True)      # put it back for the rest of this chapter
+```
+
+`no_tip_tracking()` has the same shape and the same behaviour. To keep the suppression scoped,
+restore it yourself:
+
+```{python}
+#| eval: false
+from pylabrobot.resources import set_volume_tracking
+
+was_on = does_volume_tracking()
+try:
+    with no_volume_tracking():
+        ...
+finally:
+    set_volume_tracking(was_on)
+```
+:::
 
 ::: {.callout-note}
 ## What the tracker knows
