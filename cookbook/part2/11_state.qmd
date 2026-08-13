@@ -1,13 +1,284 @@
 ---
 title: "Saving and loading"
+subtitle: "Layout and contents are two files, and only one of them is the deck"
 ---
 
-::: {.callout-note appearance="simple"}
-Not yet written. See `PLAN.md` §3 for this chapter's scope.
+PLR serializes two different things, through two different pairs of calls.
+
+**Layout** is the resource tree: which labware exists, what type it is, and where it sits.
+`save()` writes it, `load_from_json_file()` reads it.
+
+**State** is what is *in* that labware: volumes in wells, tips in spots.
+`save_state_to_file()` writes it, `load_state_from_file()` reads it.
+
+Loading a layout gives you an empty deck of the right shape. The volumes come back only if you also
+load the state.
+
+## Setup {.unnumbered}
+
+```{python}
+#| label: cell-setup
+#| output: false
+import json, pathlib, tempfile
+
+from pylabrobot.liquid_handling import LiquidHandler
+from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+from pylabrobot.resources import (
+    STARLetDeck, PLT_CAR_L5AC_A00, cor_96_wellplate_360uL_Fb,
+    TIP_CAR_288_C00, opentrons_96_filtertiprack_200ul,
+    Deck, Resource, set_volume_tracking, set_tip_tracking,
+)
+
+lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
+await lh.setup()
+
+carrier = PLT_CAR_L5AC_A00(name="carrier")
+lh.deck.assign_child_resource(carrier, rails=10)
+carrier[0] = plate = cor_96_wellplate_360uL_Fb(name="plate")
+
+tips = TIP_CAR_288_C00(name="tip_carrier")
+lh.deck.assign_child_resource(tips, rails=2)
+tips[0] = rack = opentrons_96_filtertiprack_200ul(name="rack")
+
+set_volume_tracking(True)
+set_tip_tracking(True)
+
+plate["A1"][0].set_volume(150)        # <1>
+plate["B1"][0].set_volume(75)
+
+scratch = pathlib.Path(tempfile.mkdtemp(prefix="cookbook_state_"))
+```
+
+1. Two wells with known contents, so there is something for the state file to carry.
+
+---
+
+## Save a deck layout {#save-layout}
+
+::: {.recipe}
+
+### The task
+
+Write the deck to a file, and rebuild it later without re-running the assignment code.
+
+```{python}
+#| label: cell-save-layout
+layout = scratch / "layout.json"
+lh.deck.save(str(layout), indent=2)              # <1>
+
+raw = json.loads(layout.read_text())
+print("type:    ", raw["type"])                  # <2>
+print("children:", [c["name"] for c in raw["children"]])
+print("bytes:   ", layout.stat().st_size)
+```
+
+1. `save()` is on `Resource`, so any resource can be written, not just a deck. `indent` is passed
+   through to `json.dump`.
+2. The `type` field holds the **class name**, which is what reconstruction looks up.
+
+```{python}
+#| label: cell-load-layout
+restored = Deck.load_from_json_file(str(layout))    # <1>
+print("class:    ", type(restored).__name__)
+print("resources:", len(restored.get_all_resources()))
+print("plate found:", restored.get_resource("plate").name)
+```
+
+1. A classmethod: it builds a new object rather than mutating an existing deck.
+
+Loading re-runs `assign_child_resource` for every resource in the file, so any warning the deck
+emits at assignment time is emitted again — here, the tall-tip-rack traverse warning that the setup
+cell already produced once.
+
+[**Why it works.** `serialize()` walks the tree and writes each resource as a dict of its
+constructor arguments plus a `type` and a `location`, with children nested underneath.
+`deserialize()` reverses it: look up the class named by `type`, call it with the saved arguments,
+then recurse into `children` and re-assign each one at its saved location.]{.why}
+
+::: {.callout-note}
+## The file is large
+
+A STARlet deck with one plate and one tip rack serializes to roughly 300 KB, because every well and
+every tip spot is a resource with its own entry. This is a description of the deck, not a diff.
 :::
 
-**Planned recipes**
+**See also:** the visualizer in
+[chapter 1](../part1/01_robot_on_screen.qmd#visualizer) renders from this same `serialize()` output.
 
-- Save a deck layout
-- Save and restore contents
-- Why layout and state are different files
+:::
+
+---
+
+## Save and restore contents {#save-state}
+
+::: {.recipe}
+
+### The task
+
+Record what is in the wells, and put it back on a deck that has already been rebuilt.
+
+```{python}
+#| label: cell-save-state
+state = scratch / "state.json"
+lh.deck.save_state_to_file(str(state), indent=2)      # <1>
+
+st = json.loads(state.read_text())
+print("entries:", len(st))                            # <2>
+print("A1:", st["plate_well_A1"]["volume"])
+print("B1:", st["plate_well_B1"]["volume"])
+print("bytes:  ", state.stat().st_size)
+```
+
+1. Writes the state of this resource and everything below it.
+2. A **flat dict keyed by resource name** — not nested like the layout. Every stateful resource on
+   the deck gets an entry, which is why there are hundreds.
+
+The single-resource forms:
+
+```{python}
+#| label: cell-serialize-state
+print("one well: ", plate["A1"][0].serialize_state())      # <1>
+print("all state:", len(lh.deck.serialize_all_state()), "entries")   # <2>
+```
+
+1. `serialize_state()` returns this resource's own state as a dict.
+2. `serialize_all_state()` returns the flat name → state mapping for the whole subtree. This is what
+   `save_state_to_file` writes.
+
+[**Why it works.** State lives in trackers, not in the resource geometry. A `Well`'s volume tracker
+holds `volume`, `pending_volume`, and `max_volume`; a `TipSpot`'s tip tracker holds whether a tip is
+present. Keying by resource name is what lets state be applied to *any* tree that has resources with
+matching names — the state file does not care how the deck was built.]{.why}
+
+::: {.callout-warning}
+## Gotcha: state is keyed by name, so names are the contract
+
+`load_state` matches entries to resources by name. Rename a plate between the save and the load and
+its wells no longer match, so the volumes are silently not restored — there is no error, because a
+tree that lacks a key simply has nothing applied to it.
+:::
+
+**See also:** `set_volume()` in [chapter 4](../part1/04_indexing.qmd#summary-map) writes the same
+tracker directly, without a file.
+
+:::
+
+---
+
+## Why layout and state are two files {#layout-vs-state}
+
+::: {.recipe}
+
+### The task
+
+See what each file restores, by loading them one at a time.
+
+```{python}
+#| label: cell-layout-vs-state
+fresh = Deck.load_from_json_file(str(layout))        # <1>
+fresh_plate = fresh.get_resource("plate")
+print("after layout only:", fresh_plate["A1"][0].tracker.get_used_volume())
+
+fresh.load_state_from_file(str(state))               # <2>
+print("after state too:  ", fresh_plate["A1"][0].tracker.get_used_volume())
+print("and B1:           ", fresh_plate["B1"][0].tracker.get_used_volume())
+```
+
+1. The layout rebuilds the plate, the wells, and their positions — with empty trackers.
+2. The state fills the trackers in.
+
+[**Why it works.** `serialize()` writes constructor arguments; a well's *volume* is not one of them.
+The two files answer different questions — "what is on the deck" and "what is in it" — and a deck
+description that changed every time you pipetted would not be a description of the deck.]{.why}
+
+::: {.callout-note}
+## Which file changes when
+
+The layout changes when you assign, unassign, or move labware. The state changes on every aspirate,
+dispense, pick-up, and drop. Saving state mid-run is cheap relative to the layout: about 100 KB
+against 300 KB for the deck above, and the layout is usually identical between runs.
+:::
+
+**See also:** telling PLR about an off-deck move is a *layout* change
+([chapter 9](../part2/09_moving_labware.qmd#off-deck-moves)); telling it a trough was filled by hand
+is a *state* change.
+
+:::
+
+---
+
+## Load a layout that uses classes you defined {#find-subclass}
+
+::: {.recipe}
+
+### The task
+
+Reconstruct a deck whose `type` fields name classes that are not part of PLR.
+
+```{python}
+#| label: cell-find-subclass
+from pylabrobot.utils.object_parsing import find_subclass
+
+print("Plate:        ", find_subclass("Plate", Resource))          # <1>
+print("NotAnyClass:  ", find_subclass("NotAnyClass", Resource))    # <2>
+```
+
+1. Reconstruction resolves a `type` string to a class with `find_subclass`.
+2. An unknown name resolves to `None`, and `deserialize` turns that into a `ValueError`.
+
+```{python}
+#| label: cell-find-subclass-fail
+broken = json.loads(layout.read_text())
+broken["children"][0]["type"] = "MyCustomCarrier"       # <1>
+broken_file = scratch / "broken.json"
+broken_file.write_text(json.dumps(broken))
+
+try:
+    Deck.load_from_json_file(str(broken_file))
+except ValueError as e:
+    print(f"{type(e).__name__}: {e}")
+```
+
+1. Standing in for a layout saved by code that defined its own carrier class.
+
+[**Why it works.** `find_subclass` recurses through `cls.__subclasses__()`. Python registers a
+subclass there when the `class` statement executes — that is, when its module is imported. A class
+whose module has not been imported is not in the tree, so `find_subclass` returns `None` and
+reconstruction fails with `Could not find subclass with name ...`.]{.why}
+
+::: {.callout-warning}
+## Gotcha: import your own classes before loading
+
+For labware you define yourself ([chapter 14](../part4/14_custom_labware.qmd)), the class must be
+imported into the loading process **before** `load_from_json_file` runs, even though the file names
+it. The import is what registers it.
+
+PLR's own definitions are exempt in practice because `pylabrobot.resources.__init__` imports every
+vendor package, so the classes are registered as soon as you import anything from `resources`.
+:::
+
+::: {.column-margin}
+**Python you need here**
+
+`SomeClass.__subclasses__()` returns direct subclasses only, which is why `find_subclass` recurses.
+The list is populated as a side effect of class creation, so it reflects what has been imported —
+not what exists on disk.
+:::
+
+**See also:** `deserialize(..., allow_marshal=True)` additionally reconstructs *functions* from the
+file. It is off by default because it executes data from the file as code.
+
+:::
+
+---
+
+## What to remember
+
+- **Layout** = `save()` / `load_from_json_file()`: the tree, types, and positions.
+  **State** = `save_state_to_file()` / `load_state_from_file()`: volumes and tips.
+- Loading a layout gives empty trackers. Load state to fill them.
+- The layout is nested and keyed by structure; the state is **flat and keyed by resource name**.
+  A renamed resource silently gets no state back.
+- `serialize_state()` is one resource, `serialize_all_state()` is the subtree.
+- Reconstruction resolves `type` through `find_subclass`, which only sees **imported** classes —
+  import your own before loading, or get `ValueError: Could not find subclass with name ...`.

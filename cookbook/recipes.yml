@@ -250,3 +250,23 @@
   path: part2/08_tips.qmd#probe-consolidate
   chapter: 8
   apis: "lh.probe_tip_inventory, lh.probe_tip_presence_via_pickup, lh.consolidate_tip_inventory, lh.move_tips"
+
+- title: "Save a deck layout"
+  path: part2/11_state.qmd#save-layout
+  chapter: 11
+  apis: "Resource.save, Resource.serialize, Resource.deserialize, Deck.load_from_json_file, deck.get_all_resources"
+
+- title: "Save and restore contents"
+  path: part2/11_state.qmd#save-state
+  chapter: 11
+  apis: "save_state_to_file, load_state_from_file, serialize_state, serialize_all_state, load_state, load_all_state"
+
+- title: "Why layout and state are two files"
+  path: part2/11_state.qmd#layout-vs-state
+  chapter: 11
+  apis: "Deck.load_from_json_file, load_state_from_file, tracker.get_used_volume"
+
+- title: "Load a layout that uses classes you defined"
+  path: part2/11_state.qmd#find-subclass
+  chapter: 11
+  apis: "find_subclass, utils.object_parsing, Resource.deserialize, allow_marshal, __subclasses__"
