@@ -1,0 +1,92 @@
+name: Cookbook
+
+# Renders the PyLabRobot Cookbook and publishes it to GitHub Pages.
+#
+# The build is also the book's correctness check. `_freeze/` is gitignored, so
+# every run executes every recipe against the pinned PyLabRobot, and
+# `execute.error: false` in _quarto.yml means a recipe that stops working
+# fails this workflow. That is the anti-rot mechanism described in
+# cookbook/README.md.
+
+on:
+  push:
+    # The cookbook currently lives on redesign-plan. Add "main" here (or
+    # replace this entry) when that branch merges.
+    branches: [redesign-plan]
+    paths:
+      - "cookbook/**"
+      - ".github/workflows/cookbook.yml"
+  pull_request:
+    paths:
+      - "cookbook/**"
+      - ".github/workflows/cookbook.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a newer run supersede an in-flight one, but never cancel a deploy midway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system libraries
+        # pylabrobot imports backends that bind libusb and hidapi at import
+        # time. The wheels ship the Python bindings, not the C libraries.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libusb-1.0-0 libhidapi-hidraw0 libhidapi-libusb0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: cookbook/requirements.txt
+
+      - name: Install Python dependencies
+        run: pip install -r cookbook/requirements.txt
+
+      - name: Verify the pinned PyLabRobot imports
+        # Fail here with a clear message rather than inside a Quarto cell.
+        run: |
+          python -c "
+          import importlib.metadata as md
+          from pylabrobot.liquid_handling import LiquidHandler
+          from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+          print('pylabrobot', md.version('pylabrobot'), 'imports cleanly')
+          "
+
+      - uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: 1.10.18
+
+      - name: Render the book
+        working-directory: cookbook
+        run: quarto render --to html
+
+      - name: Check every recipe anchor still resolves
+        run: python .github/scripts/check_cookbook.py
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: cookbook/_site
+
+  deploy:
+    needs: build
+    # Only publish from the deploying branch; pull requests build but do not deploy.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
