@@ -9,6 +9,9 @@ title: "Indexing"
 #| output: false
 from pylabrobot.liquid_handling import LiquidHandler
 from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+import itertools
+from collections import deque
+
 from pylabrobot.resources import STARLetDeck, PLT_CAR_L5AC_A00, cor_96_wellplate_360uL_Fb
 
 lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
@@ -134,6 +137,49 @@ first_five = list(itertools.islice(
 
 **See also:** the batching helpers in [chapter 7](../part2/07_worklists.qmd) chunk worklists
 across channels the same way.
+
+:::
+
+---
+
+## Stream and window a selection {#streaming}
+
+::: {.recipe}
+
+Take a finite slice of an endless well sequence, and keep a fixed-size window of what has been
+used.
+
+```{python}
+#| label: cell-streaming
+wells = itertools.cycle(plate["A1:H1"])                  # <1>
+first_ten = list(itertools.islice(wells, 10))            # <2>
+print("ten from a cycle of eight:", [w.name.split("_")[-1] for w in first_ten])
+
+recent = deque(maxlen=3)                                 # <3>
+for well in plate["A1:H1"]:
+    recent.append(well.name.split("_")[-1])
+print("last three used:", list(recent))
+```
+
+1. `cycle` repeats the selection forever without building a list.
+2. `islice` takes a finite prefix from it. Together they give "the next n wells, wrapping".
+3. `deque(maxlen=n)` drops from the left as it fills, so the window needs no bookkeeping.
+
+Grouping a plan by volume, so equal volumes batch together:
+
+```{python}
+#| label: cell-grouping
+plan = [("A1", 25), ("B1", 25), ("C1", 50), ("D1", 50)]
+
+for volume, group in itertools.groupby(plan, key=lambda row: row[1]):   # <1>
+    print(f"{volume} uL:", [well for well, _ in group])
+```
+
+1. `groupby` batches **consecutive** equal keys, so the input has to be sorted by that key first.
+
+**See also:** `traverse` [above](#traverse) does fixed-size batching over the whole plate, and
+`F.linear_tip_spot_generator` in [chapter 8](../part2/08_tips.qmd#stream-tips) is the same streaming
+idea with a disk-backed index.
 
 :::
 

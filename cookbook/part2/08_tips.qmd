@@ -130,18 +130,19 @@ async with lh.use_tips(rack_b["A2"], channels=[0], discard=False):
     pass
 ```
 
+1. **`async with`**, not `with`. `use_tips` is decorated `@contextlib.asynccontextmanager` — unlike
+   `use_channels` ([chapter 6](../part1/06_shortcuts.qmd#use-channels)), which is synchronous.
+
 ```{python}
 #| label: cell-use-tips-out
 print("mounted inside the block:", mounted_inside)
 print("mounted after the block: ", mounted_after)
-print("A1 has_tip (discarded):  ", rack_b.get_item("A1").has_tip())   # <2>
-print("A2 has_tip (returned):   ", rack_b.get_item("A2").has_tip())   # <3>
+print("A1 has_tip (discarded):  ", rack_b.get_item("A1").has_tip())   # <1>
+print("A2 has_tip (returned):   ", rack_b.get_item("A2").has_tip())   # <2>
 ```
 
-1. **`async with`**, not `with`. `use_tips` is decorated `@contextlib.asynccontextmanager` — unlike
-   `use_channels` ([chapter 6](../part1/06_shortcuts.qmd#use-channels)), which is synchronous.
-2. The default is `discard=True`, so the tip went to the trash and the spot is empty.
-3. `discard=False` returns the tips to their origin spots instead, so the spot is full again.
+1. The default is `discard=True`, so the tip went to the trash and the spot is empty.
+2. `discard=False` returns the tips to their origin spots instead, so the spot is full again.
 
 ::: {.column-margin}
 **Python you need here**

@@ -307,18 +307,18 @@ carrier[0] = plate                                        # <1>
 
 set_volume_tracking(True)
 plate["A1"][0].set_volume(100)
-
 ```
+
+1. The definition goes onto a carrier like any other plate.
 
 ```{python}
 #| label: cell-on-deck-out
 print("absolute location:", plate.get_absolute_location())
 print("A1 volume:", plate["A1"][0].tracker.get_used_volume(), "uL")
-print("liquid height:", round(well.compute_height_from_volume(100), 2), "mm")   # <2>
+print("liquid height:", round(well.compute_height_from_volume(100), 2), "mm")   # <1>
 ```
 
-1. The definition goes onto a carrier like any other plate.
-2. 100 µL of 200 stands 10.21 mm up a 15 mm well — the cone holds less per millimetre than the
+1. 100 uL of 200 stands 10.21 mm up a 15 mm well: the cone holds less per millimetre than the
    cylinder above it.
 
 **`ResourceDefinitionIncompleteError` will not tell you what is missing.**

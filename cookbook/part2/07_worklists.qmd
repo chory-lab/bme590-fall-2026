@@ -161,6 +161,44 @@ not as a `ValueError` mid-run.
 
 ---
 
+## Pair a worklist with channels {#pairing}
+
+::: {.recipe}
+
+`zip` and `enumerate` are how a list of rows becomes per-channel arguments.
+
+```{python}
+#| label: cell-pairing
+plan = [("B1", 25.0), ("B2", 30.0), ("B3", 15.0)]
+
+for i, (well, volume) in enumerate(plan):                 # <1>
+    print(f"channel {i}: {well} <- {volume} uL")
+
+wells, volumes = zip(*plan)                               # <2>
+print("wells:  ", list(wells))
+print("volumes:", list(volumes))
+
+resources = [target[w][0] for w in wells]                 # <3>
+print("ready for aspirate:", len(resources), "resources,", len(volumes), "volumes")
+```
+
+1. `enumerate` supplies the channel index alongside the row. It takes `start=` when the first
+   channel is not 0.
+2. `zip(*rows)` transposes: a list of pairs becomes a pair of tuples, which is the shape
+   `aspirate(resources, vols)` wants ([chapter 5](../part1/05_pipetting.qmd#basics)).
+3. `vols` must be a list of the same length as the resources, so building both from one `zip` keeps
+   them aligned by construction.
+
+`zip` stops at the shortest argument, so a worklist with a missing volume silently produces fewer
+operations. `zip(..., strict=True)` raises instead.
+
+**See also:** [chapter 4](../part1/04_indexing.qmd#streaming) covers `itertools` and `deque` on well
+selections.
+
+:::
+
+---
+
 ## Group rows into channel-parallel batches {#batching}
 
 ::: {.recipe}

@@ -7,7 +7,8 @@ title: "Process and system design"
 ```{python}
 #| label: cell-setup
 #| output: false
-import asyncio, functools, io, json, logging, pathlib, tempfile
+import asyncio, functools, io, itertools, json, logging, pathlib, sqlite3, tempfile
+from collections import deque
 from datetime import datetime
 
 from pylabrobot.liquid_handling import LiquidHandler
@@ -40,165 +41,22 @@ scratch = pathlib.Path(tempfile.mkdtemp(prefix="cookbook_run_"))
 
 ---
 
-## Write a protocol as steps {#steps}
+## Compose behaviour with decorators {#recovery}
 
 ::: {.recipe}
 
-Turn a script into a list of named steps that record what ran.
+Retry, recovery, step recording, and dry-run wrappers all attach to a protocol step as decorators,
+so the step body stays free of them.
 
-```{python}
-#| label: cell-steps
-#| output: false
-RUN_LOG = []                                            # <1>
+Two mechanics are worth stating before the patterns are written:
 
-def step(name):
-    def decorator(fn):
-        @functools.wraps(fn)                            # <2>
-        async def wrapper(*args, **kwargs):
-            started = datetime.now()
-            try:
-                result = await fn(*args, **kwargs)
-                RUN_LOG.append({"step": name, "status": "ok",
-                                "seconds": (datetime.now() - started).total_seconds()})
-                return result
-            except Exception as e:
-                RUN_LOG.append({"step": name, "status": "failed",
-                                "error": f"{type(e).__name__}: {e}"})
-                raise                                   # <3>
-        return wrapper
-    return decorator
+- Decorators apply **bottom-up**: `@a` over `@b` over `def f` is `f = a(b(f))`. An exception raised in
+  the body travels outward through `b` first, so the outermost decorator gets the last word, and
+  reordering the stack changes which handler acts first.
+- Retrying re-runs **everything** in the retried unit. `aspirate` and `dispense` change deck state,
+  so a step containing them is not idempotent; reads such as `summary()` and `get_resource()` are.
 
-@step("add buffer")
-async def add_buffer(lh, plate, vol):
-    await lh.pick_up_tips(rack["A1"])
-    await lh.aspirate(plate["A1"], vols=[vol])
-    await lh.dispense(plate["B1"], vols=[vol])
-    await lh.return_tips()
-
-await add_buffer(lh, plate, 50)
-```
-
-```{python}
-#| label: cell-steps-out
-for entry in RUN_LOG:
-    print(entry)
-```
-
-1. One list, appended to by every step.
-2. `functools.wraps` copies `__name__` and `__doc__` onto the wrapper, so tracebacks and
-   introspection still show the original function.
-3. Re-raising leaves the caller's error handling unchanged — the decorator observes, it does not
-   swallow.
-
-**Retry granularity follows idempotency.**
-
-Re-running a step re-runs everything in its body. `add_buffer` above aspirates and dispenses: run it
-twice and 100 µL moves, not 50. `lh.aspirate`, `lh.dispense`, and `lh.transfer` change state on the
-deck, so a step containing them produces a different result on a second call.
-
-Reads are different. `lh.summary()`, `deck.get_resource()`, `probe_tip_inventory()`, and
-`plate.get_quadrant()` return the same answer every time and can be repeated freely.
-
-Whatever unit you retry, that unit runs twice.
-
-**See also:** `RUN_LOG` here is the hand-rolled version of what PLR's own logger already emits —
-[below](#logging).
-
-:::
-
----
-
-## Compose recovery policy as decorators {#recovery}
-
-::: {.recipe}
-
-Give different failures different responses, without an `if` ladder inside every step.
-
-Three decorators, each handling one kind of failure:
-
-```{python}
-#| label: cell-recovery-decorators
-def retry(times, on, backoff=0.0):                      # <1>
-    def decorator(fn):
-        @functools.wraps(fn)
-        async def wrapper(*args, **kwargs):
-            for attempt in range(1, times + 1):
-                try:
-                    return await fn(*args, **kwargs)
-                except on as e:
-                    print(f"  retry: attempt {attempt} hit {type(e).__name__}")
-                    if attempt == times:
-                        raise
-                    if backoff:
-                        await asyncio.sleep(backoff)
-        return wrapper
-    return decorator
-
-def recover(exc_type, using):                           # <2>
-    def decorator(fn):
-        @functools.wraps(fn)
-        async def wrapper(*args, **kwargs):
-            try:
-                return await fn(*args, **kwargs)
-            except exc_type as e:
-                print(f"  recover: {type(e).__name__} -> {using.__name__}")
-                await using(e, *args, **kwargs)         # <3>
-                return await fn(*args, **kwargs)
-        return wrapper
-    return decorator
-```
-
-1. Tier one: call it again, unchanged. Suits failures that are transient by nature — a serial
-   timeout, a USB hiccup.
-2. Tier two: run a fixup, then call it again. The fixup changes the situation, so the second call
-   is not identical to the first.
-3. The handler receives the exception plus the original arguments, so it can act on both.
-
-A third tier has no decorator: an exception nothing knows how to handle propagates, and the step
-fails.
-
-```{python}
-#| label: cell-recovery-stack
-#| output: false
-async def advance_to_next_tip(exc, *args, **kwargs):    # <1>
-    print("  fixup: taking a tip from the next spot")
-
-class SerialTimeout(Exception):
-    pass
-
-attempts = {"n": 0}
-
-@retry(3, on=(SerialTimeout,), backoff=0.0)             # <2>
-@recover(NoTipError, using=advance_to_next_tip)         # <3>
-@step("add master mix")                                 # <4>
-async def add_master_mix(lh, plate):
-    attempts["n"] += 1
-    if attempts["n"] == 1:
-        raise SerialTimeout("device did not respond")
-    await lh.pick_up_tips(rack["A2"])
-    await lh.aspirate(plate["A1"], vols=[20])
-    await lh.dispense(plate["C1"], vols=[20])
-    await lh.return_tips()
-
-await add_master_mix(lh, plate)
-```
-
-```{python}
-#| label: cell-recovery-stack-out
-print("attempts:", attempts["n"])
-```
-
-1. A fixup is an ordinary async function. It is written once and reused by every step that touches
-   tips.
-2. Applied **last**, so it is outermost and sees the exception last.
-3. Applied second.
-4. Applied **first**, so it is innermost and closest to the function body.
-
-::: {.callout-warning title="Gotcha: a blind retry re-runs the channels that worked"}
-
-`ChannelizedError` reports failure per channel
-([chapter 10](../part2/10_errors.qmd#partial-failure)). Retrying the whole operation re-runs the
-successful channels too, which dispenses into those wells twice:
+A blind retry after a `ChannelizedError` re-runs the channels that already succeeded:
 
 ```{python}
 #| label: cell-partial-retry
@@ -206,33 +64,13 @@ error = ChannelizedError(errors={2: NoTipError("no tip"),
                                  5: TooLittleLiquidError("empty")})
 used = list(range(8))
 
-blind = used                                            # <1>
-targeted = sorted(error.errors)                         # <2>
-
-print("blind retry re-runs channels:   ", blind)
-print("targeted retry re-runs channels:", targeted)
-print("double-dispensed by blind retry:", [c for c in blind if c not in targeted])
+print("blind retry re-runs:   ", used)
+print("only failed channels:  ", sorted(error.errors))
+print("double-dispensed:      ", [c for c in used if c not in error.errors])
 ```
 
-1. What `retry` above does: the same call, all eight channels.
-2. What the failed channels actually were.
-
-A recovery function for `ChannelizedError` reads `.errors` and re-runs only those channels,
-which means it needs the original `use_channels` argument — the reason `recover` passes
-`*args, **kwargs` to the handler.
-:::
-
-::: {.column-margin}
-**Python you need here**
-
-`@a` over `@b` over `def f` is `f = a(b(f))`. The one written first is applied last and ends up
-outermost. Exceptions travel from the body outward, so the outermost decorator is the last to see
-them.
-:::
-
-**See also:** the three tiers map onto
-[chapter 10](../part2/10_errors.qmd#portable-errors)'s groups — tracker errors are the recoverable
-tier, frontend guards and geometry errors generally are not.
+Recovery therefore reads `.errors` and re-runs only those channels
+([chapter 10](../part2/10_errors.qmd#partial-failure)).
 
 :::
 
@@ -298,65 +136,92 @@ of liquid, or that a plate is not where the deck says it is
 
 ---
 
-## Get a run record from PLR's logger {#logging}
+## Log at three levels {#logging}
 
 ::: {.recipe}
 
-Record what the protocol did without writing the recording code.
+PLR emits records at two levels of its own, and your protocol adds a third. Each can go to a
+different handler.
 
-**This one is PLR.** Every frontend operation already logs itself:
+| Tier | Logger | Level | What it records |
+|---|---|---|---|
+| Process | yours, e.g. `protocol` | `INFO` (20) | steps, run ids, decisions |
+| Command | `pylabrobot` | `DEBUG` (10) | one record per frontend call, arguments included |
+| Firmware | `pylabrobot.io.*` | `LOG_LEVEL_IO` (5) | bytes exchanged with the device |
 
 ```{python}
-#| label: cell-logging
+#| label: cell-log-levels
+from pylabrobot.io import LOG_LEVEL_IO
+
+print("IO   =", LOG_LEVEL_IO, "->", logging.getLevelName(LOG_LEVEL_IO))   # <1>
+print("DEBUG=", logging.DEBUG)
+print("INFO =", logging.INFO)
+```
+
+1. `LOG_LEVEL_IO` is a **custom level below `DEBUG`**, registered under the name `IO`. Setting a
+   logger to `DEBUG` therefore excludes device traffic; you have to ask for level 5 to see it.
+
+Different handlers for different tiers — console for the process, a file for everything:
+
+```{python}
+#| label: cell-log-handlers
 #| output: false
-stream = io.StringIO()
-handler = logging.StreamHandler(stream)
-handler.setFormatter(logging.Formatter(
-    "%(relativeCreated)6dms %(levelname)s %(message)s"))     # <1>
+console = logging.StreamHandler()                  # <1>
+console.setLevel(logging.INFO)
 
-plr_logger = logging.getLogger("pylabrobot")                 # <2>
-plr_logger.addHandler(handler)
-plr_logger.setLevel(logging.DEBUG)                           # <3>
+run_log = logging.FileHandler(scratch / "run.log")  # <2>
+run_log.setLevel(LOG_LEVEL_IO)
+run_log.setFormatter(logging.Formatter(
+    "%(relativeCreated)6dms %(name)-24s %(levelname)-5s %(message)s"))   # <3>
 
+protocol_log = logging.getLogger("protocol")        # <4>
+protocol_log.setLevel(logging.INFO)
+protocol_log.addHandler(console)
+protocol_log.addHandler(run_log)
+
+plr_log = logging.getLogger("pylabrobot")           # <5>
+plr_log.setLevel(LOG_LEVEL_IO)
+plr_log.addHandler(run_log)
+```
+
+1. Console handler: the process tier only, so an operator sees steps rather than device traffic.
+2. File handler: everything down to `IO`.
+3. `relativeCreated` is milliseconds since logging started — per-step timing with no instrumentation.
+4. Your own logger. Any name works; a package-style name lets you filter by prefix later.
+5. PLR's logger. It sets `propagate = False`, so its records reach only handlers attached to it —
+   attaching to the root logger does nothing.
+
+```{python}
+#| label: cell-log-run
+#| output: false
+protocol_log.info("run %s: adding buffer", "20260813-001")
 await lh.pick_up_tips(rack["A4"])
 await lh.aspirate(plate["A1"], vols=[15])
-await lh.dispense(plate["D1"], vols=[15])       # <4>
+await lh.dispense(plate["D1"], vols=[15])
 await lh.return_tips()
+protocol_log.info("run %s: done", "20260813-001")
 
-plr_logger.removeHandler(handler)
+plr_log.removeHandler(run_log)
+protocol_log.removeHandler(run_log)
+protocol_log.removeHandler(console)
 ```
+
+What the file caught. The process and command tiers interleave; the firmware tier is empty here
+because the chatterbox has no io layer to log ([testing](#testing)):
 
 ```{python}
-#| label: cell-logging-out
-for line in stream.getvalue().splitlines():
-    print(line[:110])
+#| label: cell-log-out
+for line in (scratch / "run.log").read_text().splitlines():
+    print(line[:104])
 ```
 
-1. `relativeCreated` is milliseconds since logging was initialised — per-step timing with no
-   instrumentation.
-2. PLR logs to one logger named `pylabrobot`, and sets `propagate = False` on it, so its records do
-   not reach the root logger's handlers.
-3. The operation records are emitted at `DEBUG`.
-4. The dispense is not decoration: `return_tips` raises `RuntimeError: Cannot drop tip with volume
-   15.0` if the tip still holds liquid ([chapter 8](../part2/08_tips.qmd#drop-return-discard)).
+`logger.exception(msg)` attaches the current traceback, and only works inside an `except` block —
+called elsewhere it records `NoneType: None`.
 
-**`verbose()` and log files.**
-
-`pylabrobot.verbose(True)` adds a console `StreamHandler`, and `configure()` calls it automatically
-when it detects a Jupyter kernel — which is why chatterbox output appears in notebooks without
-setup.
-
-`setup_logger(log_dir, level)` attaches a `FileHandler`. Given a directory it writes
-`pylabrobot-YYYYMMDD.log` inside it; given a path ending in `.log`, `.txt`, or `.jsonl` it writes
-that file directly.
-
-**Gotcha: `logger.exception()` only inside a handler.**
-
-`logging.getLogger(...).exception(msg)` attaches the *current* traceback. Called outside an
-`except` block there is no current exception, and the record says `NoneType: None`.
-
-**See also:** the `@step` decorator [above](#steps) records outcomes per step; this records
-individual calls. Both, together, are the run record.
+**See also:** `pylabrobot.verbose(True)` attaches a console handler to the `pylabrobot` logger, and
+`configure()` calls it automatically in a Jupyter kernel. `setup_logger(log_dir, level)` attaches a
+file handler; given a directory it writes `pylabrobot-YYYYMMDD.log`. Both are configured from a file
+in [config](#config).
 
 :::
 
@@ -407,14 +272,15 @@ stop_capture()
 recorded = json.loads(capture_file.read_text())
 ```
 
+1. Recording is global, not per-handler.
+
 ```{python}
 #| label: cell-capture-out
 print("version:", recorded["version"])
-print("commands recorded:", len(recorded["commands"]))   # <2>
+print("commands recorded:", len(recorded["commands"]))   # <1>
 ```
 
-1. Recording is global, not per-handler.
-2. **Zero** — see the warning below.
+1. **Zero** — see the warning below.
 
 ::: {.callout-warning title="Gotcha: nothing is captured from a chatterbox"}
 
@@ -448,7 +314,7 @@ run_dir.mkdir()                                         # <2>
 
 lh.deck.save(str(run_dir / "layout.json"))              # <3>
 lh.deck.save_state_to_file(str(run_dir / "state_end.json"))
-(run_dir / "run_log.json").write_text(json.dumps(RUN_LOG, indent=2))
+(run_dir / "run.log").write_text((scratch / "run.log").read_text())   # <4>
 
 print("run:", run_id)
 for f in sorted(run_dir.iterdir()):
@@ -459,6 +325,7 @@ for f in sorted(run_dir.iterdir()):
 2. `mkdir()` raises `FileExistsError` if the run id repeats.
 3. **These two are PLR** ([chapter 11](../part2/11_state.qmd#save-layout)): the layout says what was
    on the deck, the state says what was in it.
+4. The log from [above](#logging), which is what happened.
 
 **Format follows job.**
 
@@ -525,6 +392,151 @@ readers behind `load_config`.
 
 ---
 
+## Track samples in SQLite {#sqlite}
+
+::: {.recipe}
+
+A plate map that outlives the process, with a timestamp on every row. `sqlite3` is in the standard
+library and writes one file.
+
+```{python}
+#| label: cell-sqlite
+#| output: false
+db = sqlite3.connect(scratch / "samples.db")      # <1>
+db.execute("""
+    CREATE TABLE IF NOT EXISTS samples (
+        run_id     TEXT,
+        plate      TEXT,
+        well       TEXT,
+        sample_id  TEXT,
+        volume_ul  REAL,
+        recorded   TEXT,
+        PRIMARY KEY (run_id, plate, well)
+    )
+""")
+
+run_id = "20260813-001"
+now = datetime.now().isoformat(timespec="seconds")
+db.executemany(                                   # <2>
+    "INSERT OR REPLACE INTO samples VALUES (?, ?, ?, ?, ?, ?)",
+    [(run_id, "plate", "A1", "S-001", 100.0, now),
+     (run_id, "plate", "B1", "S-002", 50.0, now),
+     (run_id, "plate", "C1", "S-003", 50.0, now)],
+)
+db.commit()                                       # <3>
+```
+
+1. A path creates the file if it does not exist; `":memory:"` gives a database that disappears with
+   the process.
+2. Parameter placeholders (`?`), never string formatting.
+3. Nothing is written until `commit()`.
+
+The primary key is `(run_id, plate, well)` — one row per well per run — so `INSERT OR REPLACE`
+updates a well in place rather than duplicating it.
+
+Reading the plate map back:
+
+```{python}
+#| label: cell-sqlite-read
+for row in db.execute(
+    "SELECT well, sample_id, volume_ul, recorded FROM samples WHERE run_id = ? ORDER BY well",
+    (run_id,),
+):
+    print("{:>3}  {:<6} {:>6} uL  {}".format(*row))
+```
+
+Timestamps are what make the table answer questions a single run cannot: when a sample was last
+touched, which wells were filled in the same minute, how a plate changed between runs. Store them
+as ISO-8601 text — `datetime.isoformat()` — which sorts correctly as a string.
+
+**See also:** the one-run formats are in [chapter 7](../part2/07_worklists.qmd#formats); this is the
+across-runs one.
+
+:::
+
+---
+
+## Run machines concurrently {#concurrency}
+
+::: {.recipe}
+
+Every PLR operation is a coroutine, so independent machines can run at once with `asyncio.gather`.
+
+```{python}
+#| label: cell-concurrency
+async def incubate(seconds):                      # <1>
+    await asyncio.sleep(seconds)
+    return f"incubated {seconds}s"
+
+async def read_plate(seconds):
+    await asyncio.sleep(seconds)
+    return f"read {seconds}s"
+
+started = datetime.now()
+results = await asyncio.gather(incubate(0.2), read_plate(0.2))   # <2>
+elapsed = (datetime.now() - started).total_seconds()
+
+print(results)
+print(f"elapsed {elapsed:.2f}s for two 0.2s operations")
+```
+
+1. Stand-ins for two machines. Real ones are `Incubator` and `PlateReader` calls.
+2. `gather` runs them concurrently and returns results in argument order, not completion order.
+
+One liquid handler is a single machine: gathering two `lh.aspirate` calls does not make the arm
+move twice at once, and the operations still queue at the backend. Concurrency is between *separate*
+devices, or between a device and work that does not touch it.
+
+`asyncio.TaskGroup` (3.11+) is the alternative when a failure should cancel the siblings; `gather`
+with `return_exceptions=True` collects failures instead of raising the first one.
+
+:::
+
+---
+
+## Make simulated time and data explicit {#simulation}
+
+::: {.recipe}
+
+Waiting and measuring are the two places a protocol touches the world outside PLR. Both are easier
+to test when they arrive as arguments.
+
+```{python}
+#| label: cell-simulation
+async def real_wait(seconds):                     # <1>
+    await asyncio.sleep(seconds)
+
+class SimClock:                                   # <2>
+    def __init__(self):
+        self.elapsed = 0.0
+    async def __call__(self, seconds):
+        self.elapsed += seconds
+
+
+async def anneal(wait, minutes):                  # <3>
+    await wait(minutes * 60)
+    return "annealed"
+
+clock = SimClock()
+print(await anneal(clock, minutes=45))
+print("simulated elapsed:", clock.elapsed, "s")
+```
+
+1. The production version, which really sleeps.
+2. The simulated version, which only accumulates. A 45-minute incubation costs nothing.
+3. The protocol takes `wait` as an argument, so neither version is baked in.
+
+The same substitution applies to measurements: a reader function that returns recorded or synthetic
+values in simulation, and calls the plate reader on hardware. Deterministic synthetic data means
+seeding the RNG, so a failing run can be replayed.
+
+**See also:** `pylabrobot.io.capture` in [testing](#testing) records real device I/O for replay,
+which is the hardware-level counterpart to this.
+
+:::
+
+---
+
 ## What to remember
 
 - A decorator that records, retries, or skips leaves the step body free of that concern.
@@ -540,3 +552,8 @@ readers behind `load_config`.
   `pylabrobot.testing` in 0.2.2, and `SaverBackend` is gone.
 - One directory per run: worklist, layout, end state, run log.
 - `pylabrobot.config` configures **logging only**. Addresses are constructor arguments.
+- `deque(maxlen=n)` is a rolling window; `itertools.islice`/`cycle` keep sequences lazy;
+  `groupby` needs its input sorted by the same key.
+- `sqlite3` is stdlib and answers questions across runs, where CSV and JSON describe one.
+- `asyncio.gather` overlaps *separate* devices. One liquid handler still runs serially.
+- Pass `wait` and measurement functions in as arguments so simulation substitutes them.

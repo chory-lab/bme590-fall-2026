@@ -296,12 +296,7 @@
   chapter: 12
   apis: "STARFirmwareError, STARModuleError, ClotDetectedError, star_firmware_string_to_error, TecanError, VantageFirmwareError"
 
-- title: "Write a protocol as steps"
-  path: part3/13_system_design.qmd#steps
-  chapter: 13
-  apis: "functools.wraps, decorators, idempotency, run log"
-
-- title: "Compose recovery policy as decorators"
+- title: "Compose behaviour with decorators"
   path: part3/13_system_design.qmd#recovery
   chapter: 13
   apis: "decorator order, retry, recover, ChannelizedError.errors, partial retry, asyncio.sleep"
@@ -311,10 +306,10 @@
   chapter: 13
   apis: "dry run, LiquidHandlerChatterboxBackend, validation before execution"
 
-- title: "Get a run record from PLR's logger"
+- title: "Log at three levels"
   path: part3/13_system_design.qmd#logging
   chapter: 13
-  apis: "logging, pylabrobot logger, _log_command, relativeCreated, logger.exception, verbose, setup_logger, propagate"
+  apis: "logging, LOG_LEVEL_IO, pylabrobot logger, _log_command, relativeCreated, logger.exception, verbose, setup_logger, propagate, FileHandler, StreamHandler"
 
 - title: "Test without hardware"
   path: part3/13_system_design.qmd#testing
@@ -410,3 +405,28 @@
   path: part4/15_custom_liquid_handler.qmd#deck
   chapter: 15
   apis: "Deck, ResourceHolder, assign_child_at_slot, OTDeck, STARLetDeck, get_slot, Coordinate"
+
+- title: "Stream and window a selection"
+  path: part1/04_indexing.qmd#streaming
+  chapter: 4
+  apis: "itertools.cycle, itertools.islice, itertools.groupby, collections.deque, maxlen"
+
+- title: "Pair a worklist with channels"
+  path: part2/07_worklists.qmd#pairing
+  chapter: 7
+  apis: "zip, enumerate, zip strict, vols, use_channels"
+
+- title: "Track samples in SQLite"
+  path: part3/13_system_design.qmd#sqlite
+  chapter: 13
+  apis: "sqlite3, connect, executemany, commit, PRIMARY KEY, datetime.isoformat, plate map"
+
+- title: "Run machines concurrently"
+  path: part3/13_system_design.qmd#concurrency
+  chapter: 13
+  apis: "asyncio.gather, asyncio.TaskGroup, return_exceptions, coroutines"
+
+- title: "Make simulated time and data explicit"
+  path: part3/13_system_design.qmd#simulation
+  chapter: 13
+  apis: "asyncio.sleep, dependency injection, simulated clock, synthetic data, seeding"
