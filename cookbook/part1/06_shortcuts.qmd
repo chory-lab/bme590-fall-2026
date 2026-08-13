@@ -38,6 +38,7 @@ Distribute a volume from one source well into several target wells.
 
 ```{python}
 #| label: cell-transfer
+#| output: false
 await lh.pick_up_tips(tip_rack["A1"])
 await lh.transfer(
     plate["A1"][0],                                        # <1>
@@ -79,6 +80,7 @@ Set the channels used by every operation in a block, then revert.
 
 ```{python}
 #| label: cell-use-channels
+#| output: false
 await lh.pick_up_tips(tip_rack["A3", "B3"])
 with lh.use_channels([0, 1]):                    # <1>
     await lh.aspirate(plate["D1", "E1"], vols=[30, 30])

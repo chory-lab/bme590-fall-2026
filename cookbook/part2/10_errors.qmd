@@ -130,6 +130,7 @@ Run a list of transfers where some rows fail, and complete the rest.
 
 ```{python}
 #| label: cell-catch-recoverable
+#| output: false
 from pylabrobot.resources.errors import TooLittleLiquidError, TooLittleVolumeError
 
 plate["A1"][0].set_volume(1000)                                # <1>
@@ -149,6 +150,10 @@ for src, dst, vol in worklist:
     except (TooLittleLiquidError, TooLittleVolumeError) as e:  # <5>
         failed.append((src, dst, vol, type(e).__name__))
 
+```
+
+```{python}
+#| label: cell-catch-recoverable-out
 print("completed:", len(worklist) - len(failed), "of", len(worklist))
 for row in failed:
     print("  failed:", row)
@@ -242,15 +247,21 @@ rest of the run.
 
 ```{python}
 #| label: cell-no-tracking
+#| output: false
 from pylabrobot.resources import no_volume_tracking, does_volume_tracking
 
-print("before:", does_volume_tracking())
+before = does_volume_tracking()
 
 with no_volume_tracking():                        # <1>
-    print("inside:", does_volume_tracking())
+    inside = does_volume_tracking()
     await lh.aspirate(plate["D1"], vols=[10])     # <2>
 
-print("after: ", does_volume_tracking())          # <3>
+after = does_volume_tracking()                    # <3>
+```
+
+```{python}
+#| label: cell-no-tracking-out
+print("before:", before, "| inside:", inside, "| after:", after)
 ```
 
 1. A context manager, not a flag to reset by hand.

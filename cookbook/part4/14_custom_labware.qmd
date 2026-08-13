@@ -298,6 +298,7 @@ print("bottom:", well.bottom_type)
 
 ```{python}
 #| label: cell-on-deck
+#| output: false
 lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
 await lh.setup()
 carrier = PLT_CAR_L5AC_A00(name="carrier")
@@ -307,6 +308,10 @@ carrier[0] = plate                                        # <1>
 set_volume_tracking(True)
 plate["A1"][0].set_volume(100)
 
+```
+
+```{python}
+#| label: cell-on-deck-out
 print("absolute location:", plate.get_absolute_location())
 print("A1 volume:", plate["A1"][0].tracker.get_used_volume(), "uL")
 print("liquid height:", round(well.compute_height_from_volume(100), 2), "mm")   # <2>

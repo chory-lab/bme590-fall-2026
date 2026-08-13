@@ -144,14 +144,19 @@ before the strictness branch is ever reached. Setting `Strictness.STRICT` and pa
 
 ```{python}
 #| label: cell-strictness-chatterbox
+#| output: false
 cb, cb_plate, cb_rack = await build(
     LiquidHandlerChatterboxBackend(), opentrons_96_filtertiprack_200ul)
 await cb.pick_up_tips(cb_rack["A1"])
 
 set_strictness(Strictness.STRICT)
 await cb.aspirate(cb_plate["A1"], vols=[10], not_a_real_option=True)   # <1>
-print("no error, no warning")
 set_strictness(Strictness.WARN)
+```
+
+```{python}
+#| label: cell-strictness-chatterbox-out
+print("no error, no warning")
 ```
 
 1. The same call that raises `TypeError` on the STAR.

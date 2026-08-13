@@ -48,6 +48,7 @@ Move liquid from one well to another, with a tip on the head.
 
 ```{python}
 #| label: cell-basics
+#| output: false
 await lh.pick_up_tips(tip_rack["A1"])              # <1>
 await lh.aspirate(plate["A1"], vols=[50])          # <2>
 await lh.dispense(plate["B1"], vols=[50])          # <3>
@@ -87,6 +88,7 @@ Pipette slowly and low, to avoid aerating a viscous liquid.
 
 ```{python}
 #| label: cell-flow-height
+#| output: false
 await lh.pick_up_tips(tip_rack["A2"])
 await lh.aspirate(
     plate["A2"], vols=[80],
@@ -131,6 +133,7 @@ Aspirate from a position in the well other than its centre.
 
 ```{python}
 #| label: cell-offsets
+#| output: false
 from pylabrobot.resources import Coordinate
 
 await lh.pick_up_tips(tip_rack["A3"])
@@ -176,6 +179,7 @@ Fill eight channels from a single 195 mL reservoir.
 
 ```{python}
 #| label: cell-spread
+#| output: false
 await lh.pick_up_tips(tip_rack["A1:H1"])                   # <1>
 
 w = trough["A1"][0]                                        # <2>
@@ -221,6 +225,7 @@ Mix the contents of a well while you transfer, in one call.
 
 ```{python}
 #| label: cell-mix
+#| output: false
 from pylabrobot.liquid_handling.standard import Mix
 
 await lh.pick_up_tips(tip_rack["A4"])
@@ -257,18 +262,26 @@ Check channel spacing, and read the error when channels do not fit.
 
 ```{python}
 #| label: cell-channel-spacing
-await lh.pick_up_tips(tip_rack["A5:H5"])                       # <1>
-print("default spacings:", lh.backend.get_channel_spacings(list(range(8))))   # <2>
+#| output: false
+await lh.pick_up_tips(tip_rack["A5:H5"])                    # <1>
+spacings = lh.backend.get_channel_spacings(list(range(8)))  # <2>
 
 small = plate["A5"][0]                                      # <3>
+refusal = None
 try:
     await lh.aspirate(
         [small] * 8, vols=[10] * 8,
         use_channels=list(range(8)), spread="wide",
     )
 except ValueError as e:
-    print("refused:", e)                                    # <4>
+    refusal = e                                             # <4>
 await lh.drop_tips(tip_rack["A5:H5"])
+```
+
+```{python}
+#| label: cell-channel-spacing-out
+print("default spacings:", spacings)
+print("refused:", refusal)
 ```
 
 1. Eight tips for the eight channels being asked about — the refusal happens at planning, before

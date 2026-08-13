@@ -48,6 +48,7 @@ Turn a script into a list of named steps that record what ran.
 
 ```{python}
 #| label: cell-steps
+#| output: false
 RUN_LOG = []                                            # <1>
 
 def step(name):
@@ -75,7 +76,12 @@ async def add_buffer(lh, plate, vol):
     await lh.return_tips()
 
 await add_buffer(lh, plate, 50)
-print(RUN_LOG)
+```
+
+```{python}
+#| label: cell-steps-out
+for entry in RUN_LOG:
+    print(entry)
 ```
 
 1. One list, appended to by every step.
@@ -153,6 +159,7 @@ fails.
 
 ```{python}
 #| label: cell-recovery-stack
+#| output: false
 async def advance_to_next_tip(exc, *args, **kwargs):    # <1>
     print("  fixup: taking a tip from the next spot")
 
@@ -174,6 +181,10 @@ async def add_master_mix(lh, plate):
     await lh.return_tips()
 
 await add_master_mix(lh, plate)
+```
+
+```{python}
+#| label: cell-recovery-stack-out
 print("attempts:", attempts["n"])
 ```
 
@@ -297,6 +308,7 @@ Record what the protocol did without writing the recording code.
 
 ```{python}
 #| label: cell-logging
+#| output: false
 stream = io.StringIO()
 handler = logging.StreamHandler(stream)
 handler.setFormatter(logging.Formatter(
@@ -312,6 +324,10 @@ await lh.dispense(plate["D1"], vols=[15])       # <4>
 await lh.return_tips()
 
 plr_logger.removeHandler(handler)
+```
+
+```{python}
+#| label: cell-logging-out
 for line in stream.getvalue().splitlines():
     print(line[:110])
 ```
@@ -379,6 +395,7 @@ file, and `validate` replays a later run against it:
 
 ```{python}
 #| label: cell-capture
+#| output: false
 from pylabrobot.io.capture import start_capture, stop_capture, CaptureReader
 
 capture_file = scratch / "validation.json"
@@ -388,6 +405,10 @@ await lh.return_tips()
 stop_capture()
 
 recorded = json.loads(capture_file.read_text())
+```
+
+```{python}
+#| label: cell-capture-out
 print("version:", recorded["version"])
 print("commands recorded:", len(recorded["commands"]))   # <2>
 ```
