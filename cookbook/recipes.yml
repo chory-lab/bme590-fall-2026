@@ -270,3 +270,28 @@
   path: part2/11_state.qmd#find-subclass
   chapter: 11
   apis: "find_subclass, utils.object_parsing, Resource.deserialize, allow_marshal, __subclasses__"
+
+- title: "Pass vendor-specific options"
+  path: part2/12_hardware.qmd#backend-kwargs
+  chapter: 12
+  apis: "backend_kwargs, STARBackend.aspirate, jet, blow_out, lld_mode, surface_following_distance"
+
+- title: "Why the chatterbox accepts anything"
+  path: part2/12_hardware.qmd#kwargs-validation
+  chapter: 12
+  apis: "Strictness, set_strictness, get_strictness, _check_args, liquid_handling.strictness"
+
+- title: "Run the protocol against a STAR without a STAR"
+  path: part2/12_hardware.qmd#star-chatterbox
+  chapter: 12
+  apis: "STARChatterboxBackend, STARBackend, MachineConfiguration, ExtendedConfiguration, opentrons_chatterbox"
+
+- title: "Jog a channel by hand"
+  path: part2/12_hardware.qmd#jog
+  chapter: 12
+  apis: "lh.prepare_for_manual_channel_operation, lh.move_channel_x, lh.move_channel_y, lh.move_channel_z"
+
+- title: "Read a backend error family"
+  path: part2/12_hardware.qmd#error-families
+  chapter: 12
+  apis: "STARFirmwareError, STARModuleError, ClotDetectedError, star_firmware_string_to_error, TecanError, VantageFirmwareError"
