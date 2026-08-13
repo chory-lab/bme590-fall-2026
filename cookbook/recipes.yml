@@ -200,3 +200,28 @@
   path: part2/09_moving_labware.qmd#off-deck-moves
   chapter: 9
   apis: "Resource.unassign, Resource.assign_child_resource"
+
+- title: "The portable errors"
+  path: part2/10_errors.qmd#portable-errors
+  chapter: 10
+  apis: "ResourceNotFoundError, NoLocationError, TooLittleLiquidError, TooLittleVolumeError, NoTipError, HasTipError, NoChannelError, ChannelsDoNotFitError, BlowOutVolumeError, ResourceDefinitionIncompleteError, resources.errors, liquid_handling.errors"
+
+- title: "Continue a worklist past a bad row"
+  path: part2/10_errors.qmd#catch-recoverable
+  chapter: 10
+  apis: "TooLittleLiquidError, TooLittleVolumeError, try/except, lh.aspirate, lh.dispense"
+
+- title: "Read a partial multichannel failure"
+  path: part2/10_errors.qmd#partial-failure
+  chapter: 10
+  apis: "ChannelizedError, ChannelizedError.errors, tracker.commit, tracker.rollback, lh.probe_tip_presence_via_pickup"
+
+- title: "Suppress tracking for a block"
+  path: part2/10_errors.qmd#no-tracking
+  chapter: 10
+  apis: "no_volume_tracking, no_tip_tracking, set_volume_tracking, set_tip_tracking, does_volume_tracking"
+
+- title: "CrossContaminationError is never raised"
+  path: part2/10_errors.qmd#dead-errors
+  chapter: 10
+  apis: "CrossContaminationError, set_cross_contamination_tracking, liquid_history"

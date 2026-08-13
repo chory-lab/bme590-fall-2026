@@ -176,8 +176,9 @@ except Exception as e:
     print(type(e).__name__, "-", e)
 ```
 
-A missing name raises `ResourceNotFoundError: Resource with name 'no_such_plate' does not exist.`
-— one of the ~19 *portable* errors that raise identically on every backend ([chapter 10](../part2/10_errors.qmd)).
+A missing name raises `ResourceNotFoundError: Resource 'no_such_plate' not found` — one of the
+eight *portable* errors that raise identically on every backend
+([chapter 10](../part2/10_errors.qmd#portable-errors)).
 
 [**Why it works.** Names are unique within a tree, and PLR *enforces* it: assigning a resource whose
 name already exists raises `ValueError: Resource 'sample_plate' already assigned to deck` at

@@ -1,13 +1,385 @@
 ---
 title: "When it complains"
+subtitle: "Portable errors, partial failures, and the tracking escape hatches"
 ---
 
-::: {.callout-note appearance="simple"}
-Not yet written. See `PLAN.md` §3 for this chapter's scope.
+PLR raises errors from two places.
+
+**Frontend errors** are raised from the resource tree and the trackers, before the backend is
+called. They are *portable*: the same mistake raises the same class on every backend.
+
+**Backend errors** come from the machine and are vendor-specific — `STARFirmwareError`,
+`TecanError`, `VantageFirmwareError`. Of the 137 exception classes in 0.2.2, about 60 belong to the
+STAR backend.
+
+This chapter covers the portable set.
+
+## Setup {.unnumbered}
+
+```{python}
+#| label: cell-setup
+#| output: false
+from pylabrobot.liquid_handling import LiquidHandler
+from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+from pylabrobot.resources import (
+    STARLetDeck, PLT_CAR_L5AC_A00, cor_96_wellplate_360uL_Fb,
+    opentrons_96_filtertiprack_200ul, TIP_CAR_288_C00,
+    set_volume_tracking,
+)
+
+lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
+await lh.setup()
+
+carrier = PLT_CAR_L5AC_A00(name="carrier")
+lh.deck.assign_child_resource(carrier, rails=10)
+carrier[0] = plate = cor_96_wellplate_360uL_Fb(name="plate")
+
+tips = TIP_CAR_288_C00(name="tip_carrier")
+lh.deck.assign_child_resource(tips, rails=2)
+tips[0] = tip_rack = opentrons_96_filtertiprack_200ul(name="tips")
+
+set_volume_tracking(True)          # <1>
+```
+
+1. Volume tracking is off by default ([chapter 1](../part1/01_robot_on_screen.qmd#first-robot)).
+   The recipes below need it on.
+
+---
+
+## The portable errors {#portable-errors}
+
+::: {.recipe}
+
+### The task
+
+Look up which error a given mistake raises, and what kind of error it is.
+
+The classes sort into four groups by **where they are raised**, which also determines whether they
+are portable and whether a tracking flag can suppress them.
+
+**Tree errors** — raised by the resource tree, from a name or a location that does not resolve.
+
+| Error | Raised at | Message |
+|---|---|---|
+| `ResourceNotFoundError` | `resources/deck.py`, `resources/resource.py` | `Resource 'x' not found` (deck) / `Resource with name 'x' does not exist.` (resource) |
+| `NoLocationError` | `resources/resource.py` | `Resource 'x' has no location.` |
+
+**Tracker errors** — raised by the volume and tip trackers, from the model's record of what is
+where. These are the only ones the `no_*_tracking()` hatches suppress ([below](#no-tracking)).
+
+| Error | Raised at | Raised when |
+|---|---|---|
+| `TooLittleLiquidError` | `resources/volume_tracker.py` | aspirating more than the container holds |
+| `TooLittleVolumeError` | `resources/volume_tracker.py` | dispensing more than it can take |
+| `NoTipError` | `resources/tip_tracker.py` | a tip was expected, none found |
+| `HasTipError` | `resources/tip_tracker.py` | the tip spot already holds a tip |
+
+**Frontend guards** — raised by `LiquidHandler` itself while planning, before the backend is called.
+Not suppressible.
+
+| Error | Raised at | Raised when |
+|---|---|---|
+| `HasTipError` | `liquid_handling/liquid_handler.py` | the *channel* already has a tip |
+| `BlowOutVolumeError` | `liquid_handling/liquid_handler.py` | blow-out air exceeds the aspirated volume |
+| `ChannelsDoNotFitError` | `liquid_handling/channel_positioning.py` | channels cannot be spaced in the resource |
+
+**Backend-raised** — these two live in shared modules but are constructed only inside one backend,
+so they do not appear on other machines.
+
+| Error | Only raised by |
+|---|---|
+| `ChannelizedError` | the STAR backend ([below](#partial-failure)) |
+| `NoChannelError` | the Opentrons backend |
+
+Two further classes are defined and **never raised** anywhere in 0.2.2:
+`CrossContaminationError` ([below](#dead-errors)) and `ResourceDefinitionIncompleteError`.
+
+```{python}
+#| label: cell-portable-errors
+from pylabrobot.resources.errors import ResourceNotFoundError, NoLocationError
+
+try:
+    lh.deck.get_resource("no_such_plate")
+except ResourceNotFoundError as e:
+    print("ResourceNotFoundError:", e)
+
+orphan = cor_96_wellplate_360uL_Fb(name="orphan")     # <1>
+try:
+    orphan.get_absolute_location()
+except NoLocationError as e:
+    print("NoLocationError:", e)
+```
+
+1. Constructed but never assigned, so it has no position in the tree.
+
+[**Why it works.** Both errors are raised from the resource tree, which is Python state — no backend
+is consulted. An `except TooLittleLiquidError` written against the chatterbox behaves the same on a
+STAR, because the frontend raises before the backend is reached.]{.why}
+
+::: {.callout-note}
+## Backend errors
+
+Everything not in the table is vendor-specific: `STARModuleError` and its ~60 subclasses,
+`TecanError`, `CytomatBusyError`, and the Liconic and Molecular Devices families. Catch these by
+base class (`except STARFirmwareError`), not by leaf.
+[Chapter 12](../part2/12_hardware.qmd) covers backend error families.
 :::
 
-**Planned recipes**
+**See also:** `ResourceNotFoundError` is the failure mode of `get_resource` in
+[chapter 2](../part1/02_standard_labware.qmd#get-resource); `ChannelsDoNotFitError` is the
+no-go-zone case in [chapter 5](../part1/05_pipetting.qmd#channel-spacing).
 
-- The portable errors, and what each one means
-- Recover from a partial multichannel failure
-- Suppress tracking deliberately
+:::
+
+---
+
+## Continue a worklist past a bad row {#catch-recoverable}
+
+::: {.recipe}
+
+### The task
+
+Run a list of transfers where some rows fail, and complete the rest.
+
+```{python}
+#| label: cell-catch-recoverable
+from pylabrobot.resources.errors import TooLittleLiquidError, TooLittleVolumeError
+
+plate["A1"][0].set_volume(1000)                                # <1>
+
+worklist = [("A1", "B1", 100),                                 # <2>
+            ("A1", "B1", 100),
+            ("A1", "B1", 100),
+            ("A1", "B1", 100),                                 # <3>
+            ("A2", "B2", 50)]                                  # <4>
+
+await lh.pick_up_tips(tip_rack["A1"])
+failed = []
+for src, dst, vol in worklist:
+    try:
+        await lh.aspirate(plate[src], vols=[vol])
+        await lh.dispense(plate[dst], vols=[vol])
+    except (TooLittleLiquidError, TooLittleVolumeError) as e:  # <5>
+        failed.append((src, dst, vol, type(e).__name__))
+
+print("completed:", len(worklist) - len(failed), "of", len(worklist))
+for row in failed:
+    print("  failed:", row)
+```
+
+1. A1 is the only well with liquid. A2 is empty.
+2. B1 holds 360 µL, so the first three rows fit.
+3. The fourth would bring B1 to 400 µL. The aspirate succeeds and the **dispense** raises
+   `TooLittleVolumeError`, which leaves 100 µL in the tip.
+4. Aspirating from empty A2 raises `TooLittleLiquidError` on the **aspirate**, so no dispense is
+   attempted.
+5. Catching the two volume errors specifically leaves other exceptions to propagate.
+
+[**Why it works.** Both errors are raised by the volume tracker during planning, before the backend
+is called, so a caught error means nothing moved: the tip is still on the channel and the deck is
+unchanged. This holds for frontend errors only — a backend error can be raised mid-motion.]{.why}
+
+::: {.callout-warning}
+## Gotcha: a tip holding liquid cannot be dropped
+
+If an aspirate succeeds and its dispense fails, the tip keeps the liquid, and `drop_tips` raises:
+
+```text
+RuntimeError: Cannot drop tip with volume 50.0
+```
+
+This is a bare `RuntimeError`, not one of the portable classes, so `except TooLittleVolumeError`
+does not catch it. Dispense to waste before dropping, or handle the drop separately.
+:::
+
+::: {.column-margin}
+**Python you need here**
+
+`except (A, B) as e` catches a tuple of classes in one clause. Python takes the first matching
+`except`, so list subclasses before their parents.
+:::
+
+**See also:** the same rows checked before the run in
+[chapter 7](../part2/07_worklists.qmd#validate).
+
+:::
+
+---
+
+## Read a partial multichannel failure {#partial-failure}
+
+::: {.recipe}
+
+### The task
+
+Determine which channels failed and which succeeded after a multichannel operation raises.
+
+```{python}
+#| label: cell-partial-failure
+from pylabrobot.liquid_handling.errors import ChannelizedError
+from pylabrobot.resources.errors import NoTipError, TooLittleLiquidError
+
+error = ChannelizedError(errors={                      # <1>
+    2: NoTipError("Channel 2 does not have a tip."),
+    5: TooLittleLiquidError("Not enough liquid in container: 50.0uL > 0uL."),
+})
+
+used_channels = list(range(8))
+survivors = [ch for ch in used_channels if ch not in error.errors]   # <2>
+
+print("failed channels: ", sorted(error.errors))
+print("survived:        ", survivors)
+print("failure count:   ", len(error))                               # <3>
+for channel, cause in sorted(error.errors.items()):
+    print(f"  channel {channel}: {type(cause).__name__} - {cause}")  # <4>
+```
+
+1. Constructed here, not provoked: the chatterbox does not raise one (see below).
+2. `error.errors` is a `Dict[int, Exception]` keyed by channel index. Channels absent from it
+   succeeded.
+3. `ChannelizedError` implements `__len__`.
+4. Each value is that channel's individual error.
+
+[**Why it works.** `aspirate` uses the error to decide which trackers to commit:
+
+```python
+successes = [error is None] * len(aspirations)
+if error is not None and isinstance(error, ChannelizedError):
+    successes = [channel_idx not in error.errors for channel_idx in use_channels]
+
+for channel, op, success in zip(use_channels, aspirations, successes):
+    (op.resource.tracker.commit if success else op.resource.tracker.rollback)()
+```
+
+Tracker updates stay pending until the backend returns. A `ChannelizedError` commits the channels
+not listed in `errors` and rolls back the rest; any other exception rolls back all of them. After
+catching one, PLR's model already reflects what happened.]{.why}
+
+::: {.callout-warning}
+## Gotcha: only the STAR backend raises this
+
+In 0.2.2, `ChannelizedError` is constructed in one place —
+`liquid_handling/backends/hamilton/STAR_backend.py`. The chatterbox never produces one, so a
+partial-failure handler cannot be exercised in simulation. The frontend logic that consumes it is
+backend-agnostic.
+:::
+
+**See also:** `lh.probe_tip_presence_via_pickup()` catches `ChannelizedError`, marks the failed
+channels' spots as empty, and re-raises if a channel it did not ask about appears in `errors`.
+
+:::
+
+---
+
+## Suppress tracking for a block {#no-tracking}
+
+::: {.recipe}
+
+### The task
+
+Aspirate from a well whose contents PLR does not know about, without disabling tracking for the
+rest of the run.
+
+```{python}
+#| label: cell-no-tracking
+from pylabrobot.resources import no_volume_tracking, does_volume_tracking
+
+print("before:", does_volume_tracking())
+
+with no_volume_tracking():                        # <1>
+    print("inside:", does_volume_tracking())
+    await lh.aspirate(plate["D1"], vols=[10])     # <2>
+
+print("after: ", does_volume_tracking())          # <3>
+```
+
+1. A context manager, not a flag to reset by hand.
+2. D1 was never filled. With tracking on this raises `TooLittleLiquidError`.
+3. Restored on exit, including when the block raises.
+
+[**Why it works.** The trackers read one module-level flag. `no_volume_tracking()` saves it, clears
+it, and restores it in a `finally`. `no_tip_tracking()` does the same for the tip trackers.]{.why}
+
+::: {.callout-note}
+## What the tracker knows
+
+A container's tracked volume is only what PLR was told — by `set_volume()`, or by an aspirate or
+dispense it performed. Liquid that arrived any other way is not in the model: a trough filled by
+hand before the run, a plate returned from a machine PLR does not model, or a well whose starting
+volume was never seeded. In each case the tracked volume is 0 and an aspirate raises
+`TooLittleLiquidError` while the well is physically full.
+:::
+
+::: {.callout-warning}
+## Gotcha: `no_tip_tracking()` does not suppress every `HasTipError`
+
+There are two, and only one is suppressible:
+
+| Message | Raised by | Suppressible |
+|---|---|---|
+| `"Channel has tip"` | `liquid_handler.py`, on the channel head | no |
+| `"<spot> already has a tip."` | the tip spot's tracker | yes |
+
+In `pick_up_tips`, the channel-head check sits one line above the `does_tip_tracking()` guard, so it
+runs unconditionally. Picking up a second tip on an occupied channel fails inside
+`no_tip_tracking()` exactly as it does outside.
+:::
+
+**See also:** `set_volume_tracking(True)` / `set_tip_tracking(True)` set the flags globally, as this
+chapter's setup does; the `no_*` context managers scope the suppression instead.
+
+:::
+
+---
+
+## `CrossContaminationError` is never raised {#dead-errors}
+
+::: {.recipe}
+
+### The task
+
+Know that the class imports and can never fire, so it is not used as a check.
+
+```{python}
+#| label: cell-dead-errors
+import warnings
+from pylabrobot.resources.errors import CrossContaminationError
+
+with warnings.catch_warnings(record=True) as caught:      # <1>
+    warnings.simplefilter("always")
+    CrossContaminationError("tip touched two liquids")
+    print(caught[0].category.__name__, "->", caught[0].message)
+```
+
+1. Constructing one emits a `DeprecationWarning` from its `__init__`. Nothing in the package raises
+   it.
+
+[**Why it works.** Liquid identity tracking was removed before 0.2.2. The class remains so existing
+`except CrossContaminationError` clauses still import, but nothing raises it. Cross-contamination
+guarantees in 0.2.2 come from your own tip-handling policy.]{.why}
+
+::: {.callout-note}
+## Related removals
+
+`set_cross_contamination_tracking()` and `tracker.liquid_history` are gone entirely in 0.2.2. Code
+from older PLR that calls them raises `ImportError` or `AttributeError` at the import line.
+:::
+
+:::
+
+---
+
+## What to remember
+
+- Frontend errors are portable; backend errors are not. Eight classes cover the portable
+  liquid-handling surface, in three groups: **tree**, **tracker**, and **frontend guard**. Only the
+  tracker group is suppressible.
+- `ChannelizedError` (STAR) and `NoChannelError` (Opentrons) sit in shared modules but are raised by
+  one backend each. `CrossContaminationError` and `ResourceDefinitionIncompleteError` are never
+  raised at all.
+- A caught frontend error means nothing moved — trackers rolled back, the loop can continue.
+- `ChannelizedError.errors` maps channel → cause; channels not listed succeeded and are already
+  committed. Only the STAR backend raises it.
+- `no_volume_tracking()` / `no_tip_tracking()` are scoped context managers.
+- `"Channel has tip"` is unconditional; the tip-spot `HasTipError` is suppressible.
+- `CrossContaminationError` is never raised.
