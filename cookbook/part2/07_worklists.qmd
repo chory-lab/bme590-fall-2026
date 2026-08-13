@@ -14,6 +14,7 @@ from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
 from pylabrobot.resources import (
     STARLetDeck, PLT_CAR_L5AC_A00, cor_96_wellplate_360uL_Fb,
     opentrons_96_filtertiprack_200ul, TIP_CAR_288_C00,
+    set_volume_tracking,
 )
 
 lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
@@ -28,13 +29,16 @@ tips = TIP_CAR_288_C00(name="tip_carrier")
 lh.deck.assign_child_resource(tips, rails=2)
 tips[0] = tip_rack = opentrons_96_filtertiprack_200ul(name="tips")
 
+set_volume_tracking(True)          # <1>
 source["A1"][0].set_volume(2000)
 
-scratch = pathlib.Path(tempfile.mkdtemp(prefix="cookbook_worklist_"))   # <1>
+scratch = pathlib.Path(tempfile.mkdtemp(prefix="cookbook_worklist_"))   # <2>
 print("scratch dir:", scratch)
 ```
 
-1. Recipes write their files to a throwaway directory, so the notebook leaves nothing behind.
+1. Volume tracking is off by default. The results recipe reads well volumes back out, which only
+   reports anything once it is on.
+2. Recipes write their files to a throwaway directory, so the notebook leaves nothing behind.
    Real runs use a timestamped run directory instead — [chapter 13](../part3/13_system_design.qmd)
    makes that the rule.
 
@@ -54,7 +58,7 @@ module reads and writes it, and `pathlib.Path` handles paths without string surg
 Take a spreadsheet of transfers — one row per transfer — and execute it.
 
 ```{python}
-#| label: cell-csv-run
+#| label: cell-csv-write
 #| output: false
 worklist = scratch / "worklist.csv"
 with open(worklist, "w", newline="") as f:                   # <1>
@@ -62,11 +66,27 @@ with open(worklist, "w", newline="") as f:                   # <1>
     writer.writerow(["target", "volume"])
     for col in range(1, 5):
         writer.writerow([f"B{col}", 25])
+```
 
-with open(worklist, newline="") as f:                        # <2>
+1. Ordinary CSV: a header, then one transfer per row. Any spreadsheet exports this.
+
+The file that produces:
+
+```{python}
+#| label: cell-csv-excerpt
+#| echo: false
+print(worklist.read_text().strip())
+```
+
+Reading it back and driving the robot from it:
+
+```{python}
+#| label: cell-csv-run
+#| output: false
+with open(worklist, newline="") as f:                        # <1>
     rows = list(csv.DictReader(f))
 
-tip = 0                                                      # <3>
+tip = 0                                                      # <2>
 for row in rows:
     await lh.pick_up_tips(tip_rack[tip])
     await lh.transfer(
@@ -78,11 +98,9 @@ for row in rows:
     tip += 1
 ```
 
-1. The worklist is ordinary CSV: a header, then one transfer per row. Any spreadsheet exports
-   this.
-2. `csv.DictReader` gives each row as a dict keyed by the header — `{"target": "B1", "volume": "25"}`.
-   Values are strings; the `float()` when you use them is the reminder.
-3. The driver loop: one tip per transfer, `lh.transfer` per row.
+1. `csv.DictReader` gives each row as a dict keyed by the header — `{"target": "B1", "volume": "25"}`.
+   Values are strings, so they are cast where they are used.
+2. The driver loop: one tip per transfer, `lh.transfer` per row.
 
 `pandas` is not required. The stdlib `csv` module reads a worklist with no third-party
 dependency, and either way the seam produces the same thing: a list of `(target, volume)` pairs.
@@ -203,9 +221,10 @@ with open(plate_map, "w", newline="") as f:                        # <1>
         ])
 
 with open(plate_map, newline="") as f:                             # <2>
-    for row in csv.DictReader(f):
-        if float(row["volume_ul"]) > 0:
-            print(row)
+    filled = [r for r in csv.DictReader(f) if float(r["volume_ul"]) > 0]
+
+for r in filled:
+    print(f"{r['well']:>4}  {r['volume_ul']:>6} uL")
 ```
 
 1. `get_all_children()` walks the target plate ([chapter 1](../part1/01_robot_on_screen.qmd#summary));
