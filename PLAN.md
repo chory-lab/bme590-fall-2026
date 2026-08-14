@@ -1,7 +1,7 @@
 # BME 590 Redesign Plan
 
-Working plan for the fork at `github.com/stefangolas/bme590-fall-2025`
-(upstream: `github.com/chory-lab/bme590-fall-2025`).
+Working plan for the fork at `github.com/stefangolas/bme590-fall-2026`
+(upstream: `github.com/chory-lab/bme590-fall-2026`).
 
 **Target: `pylabrobot==0.2.2`.** §3 is written against it. Sections 4–12 were written against the
 vendored 0.1.6 and are being migrated — see **`PLAN-0.2.2-AUDIT.md`** for what changed, what breaks,
@@ -52,7 +52,7 @@ There is no light week after W2. W4 looks light only because it teaches almost n
 ## 2. Repository structure
 
 ```
-bme590-fall-2025/
+bme590-fall-2026/
   README.md
   PLAN.md                       <- this file
   environment.yaml
@@ -1191,7 +1191,7 @@ order, silently.
 | 7 | W3 Ex2.C | "Move the tip rack on the left" — `make_deck()` (DO NOT MODIFY) creates only two *plate* carriers. No tip carrier exists on that deck. |
 | 8 | W4 conclusion | Lists `exercise_2.txt` twice (second "for exercise 3"); `exercise_1.gif` for exercise 3's GIF. |
 | 9 | W4 Ex2.C vs Ex3 | Spec says return `None, None` for invalid combos; scaffold only yields inside `if all_fragments_valid`. Ex3's `if fragments is not None` can never be false. Pick one contract — the fix changes what Ex4 verifies. |
-| 10 | W4 path cells | Markdown says `cwd` should be `bme590-fall-2025`; the comment one cell later says `bme590-fall-2025/assignments`. |
+| 10 | W4 path cells | Markdown says `cwd` should be `bme590-fall-2026`; the comment one cell later says `bme590-fall-2026/assignments`. |
 | 11 | README vs env | README says Python 3.13; `environment.yaml` pins 3.11. |
 | 12 | All notebooks | ~40 recurring typos. `excpetion` appears in 5 of 6 — **inside taught code**, so students copy it into graded submissions. Also `sumamry`, `gneeral`, `exercses`, `keep in minde`, `rightmorst`, `Impelment`, `abosrbance`, `conmbinations`. |
 
