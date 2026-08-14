@@ -234,7 +234,7 @@ in [config](#config).
 Check protocol code in CI, at four levels of cost.
 
 **1. Pure functions.** Worklist parsing ([chapter 7](../part2/07_worklists.qmd#csv-run)) and
-well-ID conversion ([chapter 4](../part1/04_indexing.qmd#labels)) are ordinary Python:
+well-ID conversion ([chapter 5](../part1/05_indexing.qmd#labels)) are ordinary Python:
 
 ```{python}
 #| label: cell-test-pure

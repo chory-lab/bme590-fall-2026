@@ -71,7 +71,7 @@ table(LiquidHandler, [
 ```
 
 `vols` is a list, one entry per channel. `None` means *backend default*, not zero.
-[Chapter 5](part1/05_pipetting.qmd), [chapter 6](part1/06_shortcuts.qmd).
+[Chapter 4](part1/04_pipetting.qmd), [chapter 6](part1/06_shortcuts.qmd).
 
 ## Tips
 
@@ -137,7 +137,7 @@ table(Plate, [
 | `plate[0]` / `plate[0:5]` / `plate[range(5)]` | by index — **always a list** |
 | `plate.get_item((0, 0))` | row, column — `plate[(0, 0)]` duplicates index 0 |
 
-An unknown identifier raises `IndexError`. [Chapter 4](part1/04_indexing.qmd#select).
+An unknown identifier raises `IndexError`. [Chapter 5](part1/05_indexing.qmd#select).
 
 ## Deck and resources
 

@@ -40,6 +40,39 @@ Every recipe does a pick-up-then-pipette-then-drop cycle. The tip mechanics are 
 
 ---
 
+## Put a tip on and take it off {#tips}
+
+::: {.recipe}
+
+Nothing pipettes without a tip on the channel. Two calls bracket every operation.
+
+```{python}
+#| label: cell-tips-basic
+#| output: false
+await lh.pick_up_tips(tip_rack["A1"])     # <1>
+# ... aspirate and dispense ...
+await lh.drop_tips(tip_rack["A1"])        # <2>
+```
+
+1. Takes a list of tip spots, one per channel.
+2. Puts them back where they came from. `lh.return_tips()` does the same without naming the spot,
+   and `lh.discard_tips()` sends them to the deck trash instead.
+
+```{python}
+#| label: cell-tips-mounted
+print("mounted:", [t is not None for t in lh.get_mounted_tips()][:4], "...")
+```
+
+Attempting to pipette with no tip raises `NoTipError`, and picking up onto a channel that already
+holds one raises `HasTipError` ([chapter 10](../part2/10_errors.qmd#portable-errors)).
+
+**See also:** [chapter 8](../part2/08_tips.qmd) covers the rest: which of the three put-away calls
+to use, streaming across racks when one runs out, and what the rack model believes.
+
+:::
+
+---
+
 ## Aspirate and dispense {#basics}
 
 ::: {.recipe}

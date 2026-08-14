@@ -116,7 +116,7 @@ base class (`except STARFirmwareError`), not by leaf.
 
 **See also:** `ResourceNotFoundError` is the failure mode of `get_resource` in
 [chapter 2](../part1/02_standard_labware.qmd#get-resource); `ChannelsDoNotFitError` is the
-no-go-zone case in [chapter 5](../part1/05_pipetting.qmd#channel-spacing).
+no-go-zone case in [chapter 4](../part1/04_pipetting.qmd#channel-spacing).
 
 :::
 

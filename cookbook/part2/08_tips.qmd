@@ -1,5 +1,5 @@
 ---
-title: "Tips"
+title: "Tip management"
 ---
 
 ## Setup {.unnumbered}
@@ -212,7 +212,7 @@ so it raises `AssertionError` instead.
 refusing any used in the last `K` samples. It has the same `get(n)` interface and the same disk
 cache, and raises `RuntimeError` when every spot is in the recent window.
 
-**See also:** `traverse` in [chapter 4](../part1/04_indexing.qmd#traverse) does the same batching
+**See also:** `traverse` in [chapter 5](../part1/05_indexing.qmd#traverse) does the same batching
 over a plate's wells; the batching helpers in
 [chapter 7](../part2/07_worklists.qmd#batching) chunk worklist rows to channel count.
 
@@ -251,6 +251,129 @@ than globally. A rack with disabled trackers accepts pick-ups from empty spots w
 
 **See also:** `no_tip_tracking()` and the two distinct `HasTipError`s in
 [chapter 10](../part2/10_errors.qmd#no-tracking).
+
+:::
+
+---
+
+## What a tip is {#tip-properties}
+
+::: {.recipe}
+
+A `Tip` carries the dimensions the backend needs, and the frontend uses them to decide whether a
+channel can take it.
+
+```{python}
+#| label: cell-tip-properties
+tip = rack_a.get_tip("A6")                       # <1>
+print("nominal volume: ", tip.nominal_volume)
+print("maximal volume: ", tip.maximal_volume)    # <2>
+print("total length:   ", tip.total_tip_length)
+print("fitting depth:  ", tip.fitting_depth)     # <3>
+print("filter:         ", tip.has_filter)
+```
+
+1. `get_tip(identifier)` returns the `Tip` object; `get_tips(...)` and `get_all_tips()` take several.
+2. `maximal_volume` is the physical capacity; `nominal_volume` is what the tip is sold as. The
+   backend's `can_pick_up_tip` compares against these
+   ([chapter 15](../part4/15_custom_liquid_handler.qmd#core)).
+3. `fitting_depth` is how far the tip goes onto the channel, which is why a tip is not just a
+   volume.
+
+Vendor subclasses add what their firmware needs. `HamiltonTip` takes a `TipSize`
+(`LOW_VOLUME`, `STANDARD_VOLUME`, `HIGH_VOLUME`, `CORE_384_HEAD_TIP`, `XL`) and a
+`TipPickupMethod` (`OUT_OF_RACK` or `OUT_OF_WASH_LIQUID`), which is what a STAR sends in its
+tip-type command.
+
+**See also:** a `TipSpot` builds its tip on demand through `make_tip()`, which is how a rack
+definition specifies what it holds ([chapter 14](../part4/14_custom_labware.qmd#layout)).
+
+:::
+
+---
+
+## Move tips between racks {#move-tips}
+
+::: {.recipe}
+
+Relocate tips without pipetting — consolidating by hand, or filling a rack from a nested one.
+
+```{python}
+#| label: cell-move-tips
+#| output: false
+for spot in rack_c["A7:D7"]:                     # <1>
+    spot.empty()
+
+await lh.move_tips(                              # <2>
+    source_tip_spots=rack_a["A7:D7"],
+    dest_tip_spots=rack_c["A7:D7"],
+)
+```
+
+1. The destination has to be free. A rack starts full, so dropping into an occupied spot raises the
+   tip-spot `HasTipError` — `TipSpot.empty()` marks one free in the model.
+2. Source and destination are lists of tip spots, paired positionally.
+
+```{python}
+#| label: cell-move-tips-out
+print("rack_a A7:", rack_a.get_item("A7").has_tip())
+print("rack_c A7:", rack_c.get_item("A7").has_tip())
+```
+
+`consolidate_tip_inventory` [below](#probe-consolidate) is the planned version of this: it works out
+which partial racks to merge and in what order.
+
+**Nested tip racks.** `NestedTipRack` is a `TipRack` with a `stacking_z_height`, for racks that
+stack inside one another (Hamilton NTR). It behaves as a tip rack in every other respect —
+`hamilton_96_tiprack_50uL_NTR` is one.
+
+:::
+
+---
+
+## Tell PLR what is on the head {#head-state}
+
+::: {.recipe}
+
+The channel head is model state like anything else, and can be set directly.
+
+```{python}
+#| label: cell-head-state
+#| output: false
+await lh.pick_up_tips(rack_a["A8"])
+mounted_tip = lh.get_mounted_tips()[0]           # <1>
+mounted_before = [t is not None for t in lh.get_mounted_tips()]
+
+lh.clear_head_state()                            # <2>
+mounted_after = [t is not None for t in lh.get_mounted_tips()]
+
+lh.update_head_state({0: mounted_tip})           # <3>
+mounted_restored = [t is not None for t in lh.get_mounted_tips()]
+
+await lh.drop_tips(rack_a["A8"])                 # <4>
+```
+
+1. The `Tip` now on channel 0. Reading it from the head rather than the rack matters: with tracking
+   on, the spot no longer holds it, so `rack_a.get_tip("A8")` raises `NoTipError`.
+2. `clear_head_state()` forgets every mounted tip.
+3. `update_head_state({channel: tip})` sets specific channels. Passing `None` as the tip marks a
+   channel empty.
+4. Restoring the model made the tip droppable again. Had the state stayed cleared, this would raise
+   `NoTipError`, and the next pick-up would raise `HasTipError: Channel has tip`.
+
+```{python}
+#| label: cell-head-state-out
+print("after pick_up:  ", mounted_before[:2])
+print("after clear:    ", mounted_after[:2])
+print("after update:   ", mounted_restored[:2])
+```
+
+This is the tip equivalent of the off-deck bookkeeping in
+[chapter 9](../part2/09_moving_labware.qmd#off-deck-moves): use it when a tip was fitted or removed
+without a PLR call, or when reconnecting to a machine that already has tips on.
+
+Nothing physical happens. `clear_head_state()` on a machine with tips still fitted leaves the model
+claiming empty channels, and the next `pick_up_tips` will try to fit a second tip.
 
 :::
 
@@ -321,3 +444,7 @@ Hamilton operation. Against the chatterbox it can only confirm the model against
 - `rack.empty()` / `fill()` / `set_tip_state({...})` write the model directly.
 - Tip tracking is off by default; with it off the rack model never changes.
 - `probe_tip_inventory` reports real presence only on a backend that raises `ChannelizedError`.
+- A `Tip` carries `maximal_volume`, `total_tip_length`, `fitting_depth`, and
+  `has_filter`; `HamiltonTip` adds `TipSize` and `TipPickupMethod`.
+- `lh.move_tips` relocates tips directly; `clear_head_state` and `update_head_state`
+  set what the head is believed to hold, and move nothing.

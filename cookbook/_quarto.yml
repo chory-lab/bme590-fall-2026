@@ -32,8 +32,8 @@ book:
         - part1/01_robot_on_screen.qmd
         - part1/02_standard_labware.qmd
         - part1/03_deck.qmd
-        - part1/04_indexing.qmd
-        - part1/05_pipetting.qmd
+        - part1/04_pipetting.qmd
+        - part1/05_indexing.qmd
         - part1/06_shortcuts.qmd
 
     - part: "Part II — Working protocols"

@@ -125,7 +125,7 @@ code page raises `UnicodeEncodeError` when printing it. In a notebook or with UT
 fine; if you hit it in a script, set `PYTHONIOENCODING=utf-8` (or `chcp 65001`) first.
 
 **See also:** `deck.get_all_children()` in [chapter 3](../part1/03_deck.qmd); the occupancy-map
-variant with a custom predicate in [chapter 4](../part1/04_indexing.qmd#summary-map).
+variant with a custom predicate in [chapter 5](../part1/05_indexing.qmd#summary-map).
 
 :::
 

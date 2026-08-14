@@ -77,7 +77,7 @@ print(params[:8])
 ```
 
 **See also:** the portable arguments this sits alongside are in
-[chapter 5](../part1/05_pipetting.qmd#flow-height).
+[chapter 4](../part1/04_pipetting.qmd#flow-height).
 
 :::
 

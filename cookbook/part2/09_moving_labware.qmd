@@ -249,7 +249,7 @@ await lh.aspirate(
 1. Pull 2.5 mm away from the magnet side and stay 1 mm off the bottom. Which sign of `x` is "away"
    depends on which side your magnet pellets to — check once, write it down.
 
-**See also:** [Chapter 5](../part1/05_pipetting.qmd) for offsets and anchors in general;
+**See also:** [Chapter 4](../part1/04_pipetting.qmd) for offsets and anchors in general;
 `SergiLabSupplies_96_MagneticRack_250ul_Vb` for a second magnet definition to compare against.
 
 :::

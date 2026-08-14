@@ -206,7 +206,7 @@ site's single plate.
 :::
 
 **See also:** `query`'s sibling helpers in `resources/utils.py` — `row_index_to_label`,
-`label_to_row_index`, and `sort_by_xy_and_chunk_by_x` appear in [chapter 4](../part1/04_indexing.qmd)
+`label_to_row_index`, and `sort_by_xy_and_chunk_by_x` appear in [chapter 5](../part1/05_indexing.qmd)
 and [chapter 7](../part2/07_worklists.qmd).
 
 :::

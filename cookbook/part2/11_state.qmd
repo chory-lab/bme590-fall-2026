@@ -140,7 +140,7 @@ its wells no longer match, so the volumes are silently not restored — there is
 tree that lacks a key simply has nothing applied to it.
 :::
 
-**See also:** `set_volume()` in [chapter 4](../part1/04_indexing.qmd#summary-map) writes the same
+**See also:** `set_volume()` in [chapter 5](../part1/05_indexing.qmd#summary-map) writes the same
 tracker directly, without a file.
 
 :::

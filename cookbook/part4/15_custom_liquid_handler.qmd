@@ -191,7 +191,7 @@ print("defined:", GantryBackend.__name__)
 4. Not part of the interface — a helper. `get_absolute_location()` plus the op's offset is the
    coordinate ([chapter 3](../part1/03_deck.qmd#locations)).
 5. `ops` is a list with one entry per channel in `use_channels`. A one-channel machine gets one.
-6. `None` means "backend default" ([chapter 5](../part1/05_pipetting.qmd#basics)) — the backend is
+6. `None` means "backend default" ([chapter 4](../part1/04_pipetting.qmd#basics)) — the backend is
    what supplies that default.
 7. `super().setup()` asserts a deck is set before the device is touched.
 

@@ -77,63 +77,63 @@
   apis: "Resource.rotated, Rotation"
 
 - title: "Select wells"
-  path: part1/04_indexing.qmd#select
-  chapter: 4
+  path: part1/05_indexing.qmd#select
+  chapter: 5
   apis: "__getitem__, get_item, get_items, slicing, plate[A1:H1]"
 
 - title: "Rows and columns"
-  path: part1/04_indexing.qmd#rows-cols
-  chapter: 4
+  path: part1/05_indexing.qmd#rows-cols
+  chapter: 5
   apis: "ItemizedResource.row, ItemizedResource.column"
 
 - title: "Walk a plate in batches"
-  path: part1/04_indexing.qmd#traverse
-  chapter: 4
+  path: part1/05_indexing.qmd#traverse
+  chapter: 5
   apis: "ItemizedResource.traverse, itertools.islice, snake"
 
 - title: "Map 96 wells into a 384-well quadrant"
-  path: part1/04_indexing.qmd#quadrant
-  chapter: 4
+  path: part1/05_indexing.qmd#quadrant
+  chapter: 5
   apis: "Plate.get_quadrant, checkerboard, block"
 
 - title: "Convert between labels and indices"
-  path: part1/04_indexing.qmd#labels
-  chapter: 4
+  path: part1/05_indexing.qmd#labels
+  chapter: 5
   apis: "row_index_to_label, label_to_row_index, split_identifier"
 
 - title: "Print an occupancy map"
-  path: part1/04_indexing.qmd#summary-map
-  chapter: 4
+  path: part1/05_indexing.qmd#summary-map
+  chapter: 5
   apis: "summary, occupied_func, get_used_volume, set_volume"
 
 - title: "Aspirate and dispense"
-  path: part1/05_pipetting.qmd#basics
-  chapter: 5
+  path: part1/04_pipetting.qmd#basics
+  chapter: 4
   apis: "lh.aspirate, lh.dispense, Container"
 
 - title: "Control speed and height"
-  path: part1/05_pipetting.qmd#flow-height
-  chapter: 5
+  path: part1/04_pipetting.qmd#flow-height
+  chapter: 4
   apis: "flow_rates, liquid_height, blow_out_air_volume"
 
 - title: "Target a position within a well"
-  path: part1/05_pipetting.qmd#offsets
-  chapter: 5
+  path: part1/04_pipetting.qmd#offsets
+  chapter: 4
   apis: "offsets, Coordinate, center, get_anchor"
 
 - title: "Aspirate from one trough with 8 channels"
-  path: part1/05_pipetting.qmd#spread
-  chapter: 5
+  path: part1/04_pipetting.qmd#spread
+  chapter: 4
   apis: "spread, use_channels, compute_channel_offsets"
 
 - title: "Mix during a transfer"
-  path: part1/05_pipetting.qmd#mix
-  chapter: 5
+  path: part1/04_pipetting.qmd#mix
+  chapter: 4
   apis: "Mix, mix, surface_following_distance"
 
 - title: "When channels do not fit"
-  path: part1/05_pipetting.qmd#channel-spacing
-  chapter: 5
+  path: part1/04_pipetting.qmd#channel-spacing
+  chapter: 4
   apis: "ChannelsDoNotFitError, get_channel_spacings, no_go_zones"
 
 - title: "One call instead of twenty lines"
@@ -407,8 +407,8 @@
   apis: "Deck, ResourceHolder, assign_child_at_slot, OTDeck, STARLetDeck, get_slot, Coordinate"
 
 - title: "Stream and window a selection"
-  path: part1/04_indexing.qmd#streaming
-  chapter: 4
+  path: part1/05_indexing.qmd#streaming
+  chapter: 5
   apis: "itertools.cycle, itertools.islice, itertools.groupby, collections.deque, maxlen"
 
 - title: "Pair a worklist with channels"
@@ -445,3 +445,23 @@
   path: part3/13_system_design.qmd#worker-loop
   chapter: 13
   apis: "asyncio.Queue, queue.get, queue.put, task_done, join, asyncio.create_task, sentinel, queue.Queue, random.seed"
+
+- title: "Put a tip on and take it off"
+  path: part1/04_pipetting.qmd#tips
+  chapter: 4
+  apis: "lh.pick_up_tips, lh.drop_tips, lh.return_tips, lh.discard_tips, lh.get_mounted_tips"
+
+- title: "What a tip is"
+  path: part2/08_tips.qmd#tip-properties
+  chapter: 8
+  apis: "Tip, maximal_volume, nominal_volume, total_tip_length, fitting_depth, has_filter, HamiltonTip, TipSize, TipPickupMethod, TipRack.get_tip, get_all_tips, TipSpot.make_tip"
+
+- title: "Move tips between racks"
+  path: part2/08_tips.qmd#move-tips
+  chapter: 8
+  apis: "lh.move_tips, NestedTipRack, stacking_z_height, hamilton_96_tiprack_50uL_NTR"
+
+- title: "Tell PLR what is on the head"
+  path: part2/08_tips.qmd#head-state
+  chapter: 8
+  apis: "lh.clear_head_state, lh.update_head_state, lh.get_mounted_tips, lh.head"

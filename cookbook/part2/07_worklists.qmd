@@ -155,7 +155,7 @@ not as a `ValueError` mid-run.
 :::
 
 **See also:** a stricter checker for well IDs can reuse `split_identifier` from
-[chapter 4](../part1/04_indexing.qmd#labels).
+[chapter 5](../part1/05_indexing.qmd#labels).
 
 :::
 
@@ -185,14 +185,14 @@ print("ready for aspirate:", len(resources), "resources,", len(volumes), "volume
 1. `enumerate` supplies the channel index alongside the row. It takes `start=` when the first
    channel is not 0.
 2. `zip(*rows)` transposes: a list of pairs becomes a pair of tuples, which is the shape
-   `aspirate(resources, vols)` wants ([chapter 5](../part1/05_pipetting.qmd#basics)).
+   `aspirate(resources, vols)` wants ([chapter 4](../part1/04_pipetting.qmd#basics)).
 3. `vols` must be a list of the same length as the resources, so building both from one `zip` keeps
    them aligned by construction.
 
 `zip` stops at the shortest argument, so a worklist with a missing volume silently produces fewer
 operations. `zip(..., strict=True)` raises instead.
 
-**See also:** [chapter 4](../part1/04_indexing.qmd#streaming) covers `itertools` and `deque` on well
+**See also:** [chapter 5](../part1/05_indexing.qmd#streaming) covers `itertools` and `deque` on well
 selections.
 
 :::
@@ -230,7 +230,7 @@ for batch in batches:
 
 `max_chunk_size=8` is the number of channels on the head. It does not cap the total worklist —
 long lists split into many batches of eight. Pick it from your hardware
-(`lh.backend.get_channel_spacings` in [chapter 5](../part1/05_pipetting.qmd#channel-spacing)),
+(`lh.backend.get_channel_spacings` in [chapter 4](../part1/04_pipetting.qmd#channel-spacing)),
 not from the file length.
 
 **See also:** `sort_by_xy_and_chunk_by_x` is the sibling of the `query` helpers from

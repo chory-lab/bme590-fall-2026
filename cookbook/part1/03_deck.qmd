@@ -107,7 +107,7 @@ ever looks wrong, ask which of the two you are reading. `z="t"` in `get_absolute
 gives the top surface, which matters when you are placing a second resource on top.
 :::
 
-**See also:** `center()` and `get_anchor()` in [chapter 5](../part1/05_pipetting.qmd) resolve
+**See also:** `center()` and `get_anchor()` in [chapter 4](../part1/04_pipetting.qmd) resolve
 positions *inside* a well, the next level down.
 
 :::
@@ -197,7 +197,7 @@ print("rotated plate sits at:", rotated.get_absolute_location())
 rotated. Prefer `rotated = plate.rotated(z=90)` and assign `rotated` to the carrier, not `plate`.
 
 **See also:** `Rotation` composes for grippers and stacks; the well-level consequence of a rotated
-plate is that indexing ([chapter 4](../part1/04_indexing.qmd)) runs along the plate's own axes.
+plate is that indexing ([chapter 5](../part1/05_indexing.qmd)) runs along the plate's own axes.
 
 :::
 

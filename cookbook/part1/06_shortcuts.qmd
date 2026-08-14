@@ -99,7 +99,7 @@ It is `with lh.use_channels(...)`, **not** `async with`. Using `async with` rais
 the block are still `await`ed — only the channel scoping is sync.
 
 **See also:** `use_channels` combines with the `[well] * n` idiom from
-[chapter 5](../part1/05_pipetting.qmd#spread) when several channels share one source.
+[chapter 4](../part1/04_pipetting.qmd#spread) when several channels share one source.
 
 :::
 

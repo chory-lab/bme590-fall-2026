@@ -110,7 +110,7 @@ except ValueError as e:
 
 The check runs when `num_items_x` / `num_items_y` are read, not at construction — so a sparse
 resource builds fine and raises later. With a full grid you get `row`, `column`, `traverse`, and
-`get_quadrant` ([chapter 4](../part1/04_indexing.qmd)); without one you keep `num_items` and
+`get_quadrant` ([chapter 5](../part1/05_indexing.qmd)); without one you keep `num_items` and
 `get_item` and lose the rest.
 :::
 
