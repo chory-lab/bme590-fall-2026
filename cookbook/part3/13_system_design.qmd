@@ -7,7 +7,7 @@ title: "Process and system design"
 ```{python}
 #| label: cell-setup
 #| output: false
-import asyncio, functools, io, itertools, json, logging, pathlib, sqlite3, tempfile
+import asyncio, functools, io, itertools, json, logging, pathlib, random, sqlite3, tempfile
 from collections import deque
 from datetime import datetime
 
@@ -494,6 +494,72 @@ with `return_exceptions=True` collects failures instead of raising the first one
 
 ---
 
+## Run a worker loop against a queue {#worker-loop}
+
+::: {.recipe}
+
+A protocol that reacts to work as it arrives — a plate handed over by another machine, a request
+from a scheduler — is a loop that waits on a queue rather than a script that runs to completion.
+
+```{python}
+#| label: cell-worker
+#| output: false
+random.seed(0)                                          # <1>
+jobs: asyncio.Queue = asyncio.Queue()
+DONE = object()                                         # <2>
+
+async def submitter(n):                                 # <3>
+    for i in range(n):
+        await asyncio.sleep(random.uniform(0, 0.02))
+        await jobs.put({"well": f"B{i + 1}", "volume": 25.0})
+    await jobs.put(DONE)
+
+async def worker():                                     # <4>
+    handled = []
+    while True:
+        job = await jobs.get()                          # <5>
+        if job is DONE:
+            jobs.task_done()
+            return handled
+        handled.append(job["well"])
+        jobs.task_done()                                # <6>
+
+submitting = asyncio.create_task(submitter(4))          # <7>
+handled = await worker()
+await submitting
+```
+
+1. Seeding makes the stochastic arrival times reproducible, so a failing run can be replayed
+   ([simulation](#simulation)).
+2. A sentinel object, compared with `is`. A `None` job and "no more jobs" are then distinguishable.
+3. The producer. In a real system this is a socket handler, a file watcher, or another machine's
+   callback.
+4. The consumer: the `while True` server loop.
+5. `await jobs.get()` suspends the coroutine until an item exists. The loop is idle, not spinning —
+   no polling interval to tune.
+6. `task_done()` marks the item complete, which is what `jobs.join()` waits on if the producer needs
+   to know the queue has drained.
+7. `create_task` starts the producer running concurrently; `await`ing it at the end surfaces any
+   exception it raised.
+
+```{python}
+#| label: cell-worker-out
+print("handled in arrival order:", handled)
+print("queue empty:", jobs.empty())
+```
+
+One worker processes jobs serially, which is what a single liquid handler requires. Running several
+workers against one queue —  `asyncio.gather(worker(), worker())` — only makes sense when the jobs
+touch different machines ([concurrency](#concurrency)).
+
+`asyncio.Queue` lives inside one event loop and is not thread-safe: use `queue.Queue` between
+threads, and a database or broker between processes ([SQLite](#sqlite)). A queue that must survive a
+crash has to be persisted — an in-memory queue loses its backlog with the process.
+
+:::
+
+---
+
 ## Make simulated time and data explicit {#simulation}
 
 ::: {.recipe}
@@ -557,3 +623,5 @@ which is the hardware-level counterpart to this.
 - `sqlite3` is stdlib and answers questions across runs, where CSV and JSON describe one.
 - `asyncio.gather` overlaps *separate* devices. One liquid handler still runs serially.
 - Pass `wait` and measurement functions in as arguments so simulation substitutes them.
+- A reactive protocol is a `while True` on `await queue.get()`: idle rather than
+  polling, serial per worker, and lost on restart unless persisted.

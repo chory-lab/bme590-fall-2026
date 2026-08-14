@@ -9,11 +9,14 @@ title: "Moving labware"
 #| output: false
 from pylabrobot.liquid_handling import LiquidHandler
 from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+from pylabrobot.liquid_handling.standard import GripDirection
 from pylabrobot.resources import (
     STARLetDeck,
     PLT_CAR_L5AC_A00,
     cor_96_wellplate_360uL_Fb,
     alpaqua_96_plateadapter_magnum_flx,
+    Coordinate,
+    Lid,
 )
 
 lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=STARLetDeck())
@@ -50,6 +53,7 @@ Move a plate from one carrier position to another.
 
 ```{python}
 #| label: move-basic
+#| output: false
 await lh.move_plate(plate, carrier[2])
 ```
 
@@ -108,7 +112,7 @@ carrier[3] = lidded
 
 lid = lidded.lid                            # <1>
 await lh.move_lid(lid, carrier[4])
-assert not lidded.has_lid                   # <2>
+assert not lidded.has_lid()                 # <2>
 
 # ... pipette into the open plate ...
 
@@ -118,9 +122,45 @@ await lh.move_lid(lid, lidded)              # <3>
 1. `move_lid` takes the `Lid` object, which you reach through `plate.lid`. **Keep a reference to
    it** — once the lid is off, `lidded.lid` is `None`, so this is your only handle for putting it
    back.
-2. `has_lid` comes from the `Liddable` mixin. As of 0.2.2 it lives in `resources/lid.py`, and
-   containers other than plates can be liddable too.
+2. **`has_lid()` is a method, not a property.** `not plate.has_lid` is always `False`, because a
+   bound method is truthy — the parentheses are load-bearing.
 3. Moving a lid *to* a plate re-lids it — the plate is a valid destination, not just a location.
+
+```{python}
+#| label: cell-lid-geometry
+lidded = cor_96_wellplate_360uL_Fb(name="lidded_demo", with_lid=True)   # <1>
+lid = lidded.lid
+print("plate size_z:      ", lidded.get_size_z())
+print("lid nesting_z:     ", lid.nesting_z_height)              # <2>
+print("lid seated at z:   ", lidded.get_lid_location(lid).z)    # <3>
+print("has_lid():         ", lidded.has_lid())
+
+lidded.lid = None                                               # <4>
+print("after `lid = None`:", lidded.has_lid())
+```
+
+1. `with_lid=True` builds the plate with its lid already seated.
+2. `nesting_z_height` is the vertical overlap between lid and parent. A `Lid` constructed with 0
+   prints a warning, because a lid that does not nest is almost always a mismeasurement.
+3. The lid is centred on the parent's top face and sunk by that overlap: 14.2 − 7.6 = 6.6 mm.
+4. `lid` is a property derived from the children, with a setter: assigning `None` unassigns the lid,
+   and assigning a `Lid` seats one.
+
+A lid must cover what it sits on. `Liddable.assign_child_resource` compares footprints and allows a
+shortfall of at most `LID_UNDERSIZE_TOLERANCE` (1.0 mm), since real lids sit just inside the rim:
+
+```{python}
+#| label: cell-lid-undersize
+small = Lid(name="wrong_lid", size_x=100.0, size_y=60.0, size_z=8.9, nesting_z_height=7.6)
+try:
+    lidded.lid = small
+except ValueError as e:
+    print(f"ValueError: {e}")
+```
+
+`Liddable` is mixed into `Container` as well as `Plate`, so troughs, tubes, petri dishes, and
+individual wells can carry a lid on the same API.
+
 
 **A seal is not a lid.**
 
@@ -140,6 +180,7 @@ Move a plate onto an Alpaqua Magnum FLX magnetic rack for a bead cleanup, then t
 
 ```{python}
 #| label: move-magnet
+#| output: false
 magnet = alpaqua_96_plateadapter_magnum_flx(name="magnet")   # <1>
 lh.deck.assign_child_resource(magnet, rails=20)
 
@@ -182,12 +223,11 @@ deep-well block do not sit at the same height on the same magnet. An unchecked v
 above the liquid or into the plate bottom.
 :::
 
-::: {.callout-warning title="Gotcha: use the snake_case name"}
+**Gotcha: use the snake_case name.**
 
 `Alpaqua_96_magnum_flx` still exists but is a deprecation shim marked `# TODO: Remove >2026-02`.
 Use `alpaqua_96_plateadapter_magnum_flx`. This rename is part of a library-wide migration to
 `<vendor>_<n>_<type>_<volume>uL_<bottom>`; expect to meet it elsewhere.
-:::
 
 ## Aspirating off the magnet {#offset-aspirate}
 
@@ -216,6 +256,135 @@ await lh.aspirate(
 
 ---
 
+## Gripper parameters {#gripper}
+
+::: {.recipe}
+
+Every move takes the same set of gripper arguments. `move_plate`, `move_lid`, and `move_resource`
+differ only in their defaults.
+
+| Argument | Meaning |
+|---|---|
+| `pickup_distance_from_top` | how far below the resource's top face the gripper closes, in mm |
+| `pickup_offset` | offset applied at the source |
+| `destination_offset` | offset applied at the destination |
+| `pickup_direction` | which side the gripper approaches from |
+| `drop_direction` | which side it faces when released |
+| `intermediate_locations` | coordinates to traverse through on the way |
+
+```{python}
+#| label: cell-gripper-defaults
+import inspect
+from pylabrobot.liquid_handling import LiquidHandler
+
+for name in ("move_resource", "move_plate", "move_lid"):
+    d = inspect.signature(getattr(LiquidHandler, name)).parameters["pickup_distance_from_top"].default
+    print(f"{name:15s} pickup_distance_from_top = {d}")
+```
+
+The defaults are per-method, not per-resource: a plate is gripped 9.87 mm below its top, a lid
+2.37 mm below its own top, and `move_resource` grips at the top face unless told otherwise. A
+plate whose skirt is not 9.87 mm deep needs the argument.
+
+```{python}
+#| label: cell-gripper-args
+#| output: false
+await lh.move_plate(
+    plate, carrier[1],
+    pickup_distance_from_top=12.0,                       # <1>
+    pickup_offset=Coordinate(x=0, y=0, z=0),             # <2>
+    destination_offset=Coordinate(x=0, y=0, z=1.5),      # <3>
+    intermediate_locations=[Coordinate(x=300, y=200, z=250)],   # <4>
+)
+```
+
+1. Grip 12 mm below the top rather than the default.
+2. Offsets shift the grip point at each end independently.
+3. Releasing 1.5 mm high drops the plate the last fraction rather than pressing it down.
+4. Waypoints between source and destination — how you route around something tall
+   ([chapter 3](../part1/03_deck.qmd#collisions) finds the tall thing).
+
+`GripDirection` is `FRONT`, `BACK`, `LEFT`, or `RIGHT`.
+
+::: {.callout-warning title="Gotcha: a direction change rotates the plate"}
+
+If `drop_direction` differs from `pickup_direction`, the frontend rotates the resource to match, and
+records that rotation in the tree:
+
+```{python}
+#| label: cell-grip-rotation
+#| output: false
+before = plate.rotation.z
+
+await lh.move_plate(plate, carrier[2],
+                    pickup_direction=GripDirection.FRONT,
+                    drop_direction=GripDirection.RIGHT)
+after_right = plate.rotation.z
+
+await lh.move_plate(plate, carrier[3],
+                    pickup_direction=GripDirection.RIGHT,
+                    drop_direction=GripDirection.LEFT)
+after_left = plate.rotation.z
+```
+
+```{python}
+#| label: cell-grip-rotation-out
+print("before:        ", before)
+print("FRONT -> RIGHT:", after_right)
+print("RIGHT -> LEFT: ", after_left)
+```
+
+Adjacent directions rotate 90°, opposite directions 180°, and the rotation accumulates on the
+resource's existing rotation. A plate that comes back at 270° indexes along its own axes
+([chapter 3](../part1/03_deck.qmd#rotation)), so `plate["A1"]` is no longer where it was.
+:::
+
+The backend receives this as three frozen dataclasses — `ResourcePickup`, `ResourceMove`, and
+`ResourceDrop`. `ResourceDrop` carries both directions plus the computed `rotation`, which is what a
+backend needs to command the arm ([chapter 15](../part4/15_custom_liquid_handler.qmd#abstract-members)).
+
+**See also:** the three phases are separately callable as `pick_up_resource`,
+`move_picked_up_resource`, and `drop_resource`. Picking up twice without dropping raises
+`RuntimeError: Resource ... already picked up`, and a backend with no arm raises
+`RuntimeError: No robotic arm is installed on this liquid handler.`
+
+:::
+
+---
+
+## Where a resource is gripped {#pickup-spots}
+
+::: {.recipe}
+
+`pick_up_resource` takes `pickup_distance_from_top=None`, and resolves it from the resource.
+
+```{python}
+#| label: cell-pickup-spot
+print("default:", plate.preferred_pickup_location)                    # <1>
+
+plate.preferred_pickup_location = Coordinate(x=63.88, y=42.74, z=10.0)  # <2>
+implied = plate.get_size_z() - plate.preferred_pickup_location.z
+print("implies pickup_distance_from_top =", round(implied, 2))          # <3>
+```
+
+1. `None` on most definitions.
+2. A point on the resource, measured in its own frame, where the gripper should close.
+3. Resolution order when `pickup_distance_from_top` is `None`: use
+   `size_z - preferred_pickup_location.z` if the resource has one, otherwise **5.0 mm**. Both
+   branches log at debug.
+
+Machine definitions use this where the grip point is not a guess: the Byonoy plate readers ship
+`preferred_pickup_location=Coordinate(x=size_x / 2, y=size_y / 2, z=29.5)`, so a plate is taken from
+the reader at the height the reader presents it.
+
+Note the asymmetry: `move_plate` and `move_lid` pass a numeric default, so they never consult
+`preferred_pickup_location`. It applies to `pick_up_resource` and to `move_resource` when the
+argument is left as `None`.
+
+:::
+
+---
+
 ## Take the top plate off a stack {#plate-stacks}
 
 ::: {.recipe}
@@ -224,6 +393,7 @@ Take the top plate off a stack without tracking the index yourself.
 
 ```{python}
 #| label: stack
+#| output: false
 #| eval: false
 from pylabrobot.resources import ResourceStack
 
@@ -254,6 +424,7 @@ A plate was moved by hand, with no PLR call. Update the model to match.
 
 ```{python}
 #| label: off-deck
+#| output: false
 #| eval: false
 plate.unassign()                            # <1>
 carrier[4].assign_child_resource(plate)     # <2>

@@ -430,3 +430,18 @@
   path: part3/13_system_design.qmd#simulation
   chapter: 13
   apis: "asyncio.sleep, dependency injection, simulated clock, synthetic data, seeding"
+
+- title: "Gripper parameters"
+  path: part2/09_moving_labware.qmd#gripper
+  chapter: 9
+  apis: "pickup_distance_from_top, pickup_offset, destination_offset, intermediate_locations, GripDirection, pickup_direction, drop_direction, ResourcePickup, ResourceMove, ResourceDrop"
+
+- title: "Where a resource is gripped"
+  path: part2/09_moving_labware.qmd#pickup-spots
+  chapter: 9
+  apis: "preferred_pickup_location, pick_up_resource, pickup_distance_from_top, Coordinate"
+
+- title: "Run a worker loop against a queue"
+  path: part3/13_system_design.qmd#worker-loop
+  chapter: 13
+  apis: "asyncio.Queue, queue.get, queue.put, task_done, join, asyncio.create_task, sentinel, queue.Queue, random.seed"

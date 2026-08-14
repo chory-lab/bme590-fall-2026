@@ -14,6 +14,12 @@ book:
   search: true
   page-navigation: true
   reader-mode: true
+  # Puts "Edit this page" / "View source" links on every page, pointing at the
+  # .qmd in GitHub's web editor. Committing there triggers the deploy workflow.
+  repo-url: https://github.com/stefangolas/bme590-fall-2026
+  repo-branch: main
+  repo-subdir: cookbook
+  repo-actions: [edit, source, issue]
   sidebar:
     style: docked
     collapse-level: 1
