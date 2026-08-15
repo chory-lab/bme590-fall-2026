@@ -221,13 +221,7 @@ For all intents and purposes, treat `assignments/` as your working directory. Th
 
 ## Help Resources & Troubleshooting
 
-If you are having issues with installing or running PyLabRobot locally, please reach out to the TA for help.  **If you are still having issues (this sometimes happens with edge cases)**, we also provide [Google Colab versions](./colab_workshops) of every workshop in case you have issues with PLR installation. These Colab versions use a modified version of PLR that is compatible with colab **but have not been as thoroughly tested as the ones in [workshops](./workshops).**
-
-To use with Colab, simply:
-1. Download the `.ipynb` file for a given workshop.
-2. Navigate to [Google Colab](https://colab.research.google.com/)
-3. Navigate to **Upload -> Browse** and upload the workshop notebook.
-4. Follow instructions in the notebook to complete the workshop.
+If you are having issues with installing or running PyLabRobot locally, please reach out to the TA for help.
 
 If at any point in this process you run into troubles installing the requisite software, please follow the order of steps below:
 
