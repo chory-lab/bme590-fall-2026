@@ -7,6 +7,7 @@ landing page plus one HTML page per workshop. Output goes to site/.
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -70,6 +71,10 @@ def main():
     out_dir = os.path.join("site", "workshops")
     os.makedirs(out_dir, exist_ok=True)
 
+    # The notebooks reference ../figs/*.png, which resolves to site/figs/ from a
+    # page in site/workshops/. Without this the images 404 on the published site.
+    shutil.copytree("figs", os.path.join("site", "figs"), dirs_exist_ok=True)
+
     subprocess.run(
         [sys.executable, "-m", "ipykernel", "install", "--user", "--name", "plr_ci",
          "--display-name", "PLR CI"],
@@ -89,8 +94,11 @@ def main():
                                 resources={"metadata": {"path": os.path.dirname(path)}})
         client.execute()
 
-        title = " ".join(path.rsplit("/", 1)[-1].rsplit(".", 1)[0].split("_")[1:]).title()
+        title = " ".join(os.path.basename(path).rsplit(".", 1)[0].split("_")[1:]).title()
         titles[os.path.basename(path)] = title
+        # The classic template prefers nb.metadata.title; without it every page
+        # is titled "Notebook".
+        nb.metadata["title"] = title
 
         (body, _resources) = exporter.from_notebook_node(nb)
         stem = os.path.basename(path).rsplit(".", 1)[0]
