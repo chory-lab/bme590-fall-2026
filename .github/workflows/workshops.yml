@@ -1,0 +1,64 @@
+name: Workshops
+
+# Verifies the workshop notebooks work "out of the box" across platforms:
+# the conda env from environment.yaml builds, every pylabrobot import the
+# notebooks use resolves, a chatterbox smoke protocol runs, and each notebook
+# executes headless. Run by .github/scripts/check_workshops.py.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "workshops/**"
+      - "environment.yaml"
+      - ".github/scripts/check_workshops.py"
+      - ".github/workflows/workshops.yml"
+  pull_request:
+    paths:
+      - "workshops/**"
+      - "environment.yaml"
+      - ".github/scripts/check_workshops.py"
+      - ".github/workflows/workshops.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: workshops (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system libraries (ubuntu)
+        # pylabrobot imports backends that bind libusb and hidapi at import
+        # time. The wheels ship the Python bindings, not the C libraries.
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libusb-1.0-0 libhidapi-hidraw0 libhidapi-libusb0
+
+      - name: Install system libraries (macos)
+        if: runner.os == 'macOS'
+        run: brew install libusb hidapi
+
+      - name: Build the student environment from environment.yaml
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-variant: Mambaforge
+          python-version: "3.11"
+          environment-file: environment.yaml
+          activate-environment: lab-automation
+          auto-update-conda: false
+          use-mamba: true
+
+      - name: Run the workshop checks
+        run: python .github/scripts/check_workshops.py

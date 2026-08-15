@@ -8,5 +8,10 @@ dependencies:
   - jsonschema
   - pip
   - pandas
+  - numpy
+  - pillow
   - pip:
-    - "pylabrobot[visualizer,opentrons]==0.1.6"
+    # PyLabRobot 0.2.2, installed from the GitHub repo (no PyPI release tag
+    # exists; dd79c4c is the 0.2.2 release commit). The workshops' APIs were
+    # verified against this exact tree.
+    - "pylabrobot[visualizer,opentrons] @ git+https://github.com/PyLabRobot/pylabrobot.git@dd79c4c"
