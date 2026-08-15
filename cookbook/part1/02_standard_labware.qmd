@@ -2,6 +2,9 @@
 title: "Standard labware"
 ---
 
+Labware in PyLabRobot ships as generic geometric definitions in Python, and is reusable across instruments. Individual labware items
+are stateful and can be queried for different properties such as location or liquid volume. 
+
 ## Setup {.unnumbered}
 
 ```{python}
