@@ -1,0 +1,71 @@
+name: Workshops Site
+
+# Renders the workshop notebooks to HTML and publishes them as the
+# bme590-fall-2026 GitHub Pages site (the class workbooks, separate from the
+# PyLabRobot cookbook site). See .github/scripts/build_workshops_site.py.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "workshops/**"
+      - "data/**"
+      - "environment.yaml"
+      - ".github/scripts/build_workshops_site.py"
+      - ".github/scripts/check_workshops.py"
+      - ".github/workflows/workshops-site.yml"
+  pull_request:
+    paths:
+      - "workshops/**"
+      - ".github/workflows/workshops-site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system libraries
+        # pylabrobot imports backends that bind libusb and hidapi at import
+        # time. The wheels ship the Python bindings, not the C libraries.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libusb-1.0-0 libhidapi-hidraw0 libhidapi-libusb0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the workshop environment
+        run: |
+          pip install \
+            "pylabrobot[visualizer,opentrons] @ git+https://github.com/PyLabRobot/pylabrobot.git@dd79c4c" \
+            jupyter numpy pandas pillow
+
+      - name: Render the notebooks
+        run: python .github/scripts/build_workshops_site.py
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
