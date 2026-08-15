@@ -239,7 +239,12 @@
 - title: "Stream tips across several racks"
   path: part2/08_tips.qmd#stream-tips
   chapter: 8
-  apis: "F.get_all_tip_spots, F.linear_tip_spot_generator, F.randomized_tip_spot_generator, cache_file_path, get_num_tips_left, set_index, resources.functional"
+  apis: "F.get_all_tip_spots, F.linear_tip_spot_generator, F.randomized_tip_spot_generator, cache_file_path, get_num_tips_left, set_index, reset, get, async for, TipRack.traverse, resources.functional"
+
+- title: "Find the next free tips from the rack itself"
+  path: part2/08_tips.qmd#next-free
+  chapter: 8
+  apis: "TipRack.get_all_items, TipSpot.has_tip, TipRack.summary, TipRack.set_tip_state, lh.pick_up_tips"
 
 - title: "Set what the rack model believes"
   path: part2/08_tips.qmd#rack-state

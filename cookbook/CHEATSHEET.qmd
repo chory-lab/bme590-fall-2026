@@ -109,7 +109,10 @@ table(F, [
 ], "F.")
 ```
 
-Both generators are async: `await gen.get(n)`. Exhaustion is `StopAsyncIteration`.
+Both generators are async: `await gen.get(n)`, or `async for spot in gen`. Exhaustion is
+`StopAsyncIteration`. Both also take `set_index(i)` / `reset()`, and neither reads the rack's
+trackers — for that, filter `rack.get_all_items()` by `has_tip()`
+([chapter 8](part2/08_tips.qmd#next-free)).
 
 ## Indexing
 

@@ -1,0 +1,22 @@
+<script>
+// Add an "Edit" button to the top bar of every page. It opens the current
+// page's source (.qmd) in GitHub's web editor; committing there triggers the
+// Cookbook workflow, so the hosted site updates from the editor.
+window.addEventListener("DOMContentLoaded", function () {
+  var nav = document.querySelector("#quarto-header .quarto-secondary-nav .container-fluid");
+  if (!nav) return;
+
+  var path = window.location.pathname;
+  path = path.replace(/^\//, "");
+  if (!path) path = "index";
+  path = path.replace(/\/+$/, "");
+  if (path.endsWith(".html")) path = path.slice(0, -5);
+
+  var a = document.createElement("a");
+  a.href = "https://github.com/chory-lab/bme590-fall-2026/edit/main/cookbook/" + path + ".qmd";
+  a.className = "btn btn-primary btn-sm ms-2";
+  a.title = "Edit this page on GitHub";
+  a.textContent = "Edit";
+  nav.appendChild(a);
+});
+</script>

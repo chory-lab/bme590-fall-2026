@@ -13,6 +13,7 @@ from pylabrobot.liquid_handling import LiquidHandler
 from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
 from pylabrobot.resources import (
     STARLetDeck, TIP_CAR_288_C00, opentrons_96_filtertiprack_200ul,
+    PLT_CAR_L5AC_A00, cor_96_wellplate_360uL_Fb,
     set_tip_tracking,
 )
 import pylabrobot.resources.functional as F
@@ -25,6 +26,10 @@ lh.deck.assign_child_resource(carrier, rails=2)
 carrier[0] = rack_a = opentrons_96_filtertiprack_200ul(name="rack_a")
 carrier[1] = rack_b = opentrons_96_filtertiprack_200ul(name="rack_b")
 carrier[2] = rack_c = opentrons_96_filtertiprack_200ul(name="rack_c")
+
+plt_carrier = PLT_CAR_L5AC_A00(name="plate_carrier")     # <4>
+lh.deck.assign_child_resource(plt_carrier, rails=10)
+plt_carrier[0] = plate = cor_96_wellplate_360uL_Fb(name="plate")
 
 set_tip_tracking(True)                                   # <2>
 
@@ -40,6 +45,8 @@ logging.getLogger("pylabrobot.resources").setLevel(logging.WARNING)   # <3>
 3. `linear_tip_spot_generator` logs one INFO line per spot to `pylabrobot.resources`
    (`Saved tip idx to disk: 8`). Raising the level keeps the streaming recipe's output readable —
    in a real run those lines are the audit trail of which tip went where.
+4. A plate to pipette into, so the streaming recipe below can run a real
+   pick-up → aspirate → dispense → discard cycle rather than just naming spots.
 
 ---
 
@@ -196,6 +203,58 @@ for spot in crossing:
 
 1. `set_index` jumps to a position — here, near the end of the first 96-spot rack.
 
+**Driving a protocol from the generator.**
+
+This is the whole point: the loop body never names a rack or a spot, and never counts. Each round
+asks for eight more spots, and the generator has already moved past them by the time the pick-up
+runs.
+
+```{python}
+#| label: cell-stream-loop
+#| output: false
+gen3 = F.linear_tip_spot_generator(spots)
+gen3.set_index(200)                                         # <1>
+
+for _ in range(3):                                          # <2>
+    fresh = await gen3.get(8)
+    await lh.pick_up_tips(fresh)
+    await lh.aspirate(plate["A1:H1"], vols=[10.0] * 8)
+    await lh.dispense(plate["A2:H2"], vols=[10.0] * 8)
+    await lh.discard_tips()                                 # <3>
+```
+
+1. Starting part-way in only to keep the example short — a real run starts at 0, or wherever the
+   cache file left off.
+2. Three rounds of eight. Twenty-four tips, no bookkeeping.
+3. `discard_tips()` rather than `return_tips()`: the generator hands out each spot exactly once, so
+   returning a used tip to a spot the generator has already passed would leave it in the rack
+   forever, unreachable and indistinguishable from a fresh one.
+
+```{python}
+#| label: cell-stream-loop-out
+index = len(spots) - gen3.get_num_tips_left()
+print("index now at:  ", index, "(started at 200)")
+print("tips consumed: ", index - 200)
+print("tips left:     ", gen3.get_num_tips_left())
+print("mounted after the loop:", [t is not None for t in lh.get_mounted_tips()][:2])
+```
+
+**Consuming one spot at a time.**
+
+The generator is an async iterator, so `async for` walks it spot by spot — useful when the channel
+count varies round to round, or when one tip serves one sample.
+
+```{python}
+#| label: cell-stream-async-for
+gen4 = F.linear_tip_spot_generator(spots[:3])               # <1>
+async for spot in gen4:
+    print(spot.parent.name, spot.name.split("_")[-1])
+print("loop ended cleanly")                                 # <2>
+```
+
+1. A three-spot slice, so the loop terminates in the output rather than after 288 lines.
+2. The loop ends on `StopAsyncIteration`, which `async for` swallows — see the gotcha below.
+
 **Gotcha: exhaustion is `StopAsyncIteration`, not a PLR error.**
 
 With `repeat=False` (the default), asking for a spot past the end raises `StopAsyncIteration` —
@@ -206,15 +265,79 @@ so it raises `AssertionError` instead.
 
 `repeat=True` cycles back to the first spot, and makes `get_num_tips_left()` raise `RuntimeError`.
 
+**Resuming after a crash or a restart.**
+
+`cache_file_path` is what makes the generator survive the process. A new generator built on the same
+path reads the index back and continues from it — the run that died half-way does not start over on
+rack A, on top of tips it already used.
+
+```{python}
+#| label: cell-stream-resume
+resumed = F.linear_tip_spot_generator(                      # <1>
+    spots,
+    cache_file_path=str(scratch / "tip_index.json"),
+)
+print("index restored to:", len(spots) - resumed.get_num_tips_left())   # <2>
+
+nxt = (await resumed.get(1))[0]
+print("next spot:", nxt.parent.name, nxt.name.split("_")[-1])           # <3>
+```
+
+1. Same spot list, same cache path, brand new object — this is what the second process does.
+2. The first cell in this recipe consumed 8 spots through this cache file. A fresh generator with no
+   cache would report 0 here.
+3. A2 of `rack_a`, not A1. `gen3` and `gen4` above passed no `cache_file_path`, so they wrote
+   nothing and did not disturb this count.
+
+::: {.column-margin}
+**Two generators, one cache file**
+
+Nothing stops you pointing two live generators at the same path — they will overwrite each other's
+index and hand out the same tips twice. One generator per cache file per run.
+:::
+
+`reset()` sets the index back to 0 **and writes that to the cache file**, which is how you start a
+fresh run against a rack you have physically reloaded. Note the asymmetry with `set_index`, which
+also persists on the next spot handed out — neither of them touches the rack model, so a reset
+generator will happily hand out spots the trackers still believe are empty.
+
 **The randomized variant.**
 
 `F.randomized_tip_spot_generator(tip_spots, K, cache_file_path=...)` picks spots at random while
-refusing any used in the last `K` samples. It has the same `get(n)` interface and the same disk
-cache, and raises `RuntimeError` when every spot is in the recent window.
+refusing any used in the last `K` samples. It has the same `get(n)` interface, the same disk cache,
+and the same `reset()`, and raises `RuntimeError` when every spot is in the recent window.
 
-**See also:** `traverse` in [chapter 5](../part1/05_indexing.qmd#traverse) does the same batching
-over a plate's wells; the batching helpers in
-[chapter 7](../part2/07_worklists.qmd#batching) chunk worklist rows to channel count.
+**Traversing one rack, in a direction you choose.**
+
+A `TipRack` is an `ItemizedResource`, so `traverse` ([chapter 5](../part1/05_indexing.qmd#traverse))
+works on it exactly as it does on a plate — it is not a plate-only method. Use it when the order
+matters and one rack is enough; use the generator when you need to cross racks or resume across
+processes.
+
+```{python}
+#| label: cell-rack-traverse
+for batch in rack_b.traverse(batch_size=8, start="top_left", direction="down"):   # <1>
+    print([s.name.split("_")[-1] for s in batch])
+    break                                                   # <2>
+
+snake = rack_b.traverse(8, "top_left", "snake_down")         # <3>
+next(snake)
+print("snake, batch 2:", [s.name.split("_")[-1] for s in next(snake)])
+```
+
+1. Same signature as the plate version: `batch_size` first, `start` required.
+2. `traverse` is a lazy generator, so one batch costs one batch.
+3. `snake_down` runs A1→H1, then H2→A2 — the shortest gantry path when the head moves column to
+   column. Nothing about tip racks changes it.
+
+**Gotcha: `traverse` reads the layout, not the trackers.**
+
+It yields every spot in the grid whether or not the spot still holds a tip. Filtering by
+`has_tip()` is [the next recipe](#next-free). The generators in this recipe have the same blind
+spot — position is theirs, occupancy is the rack's.
+
+**See also:** the batching helpers in [chapter 7](../part2/07_worklists.qmd#batching) chunk worklist
+rows to channel count.
 
 :::
 
@@ -251,6 +374,66 @@ than globally. A rack with disabled trackers accepts pick-ups from empty spots w
 
 **See also:** `no_tip_tracking()` and the two distinct `HasTipError`s in
 [chapter 10](../part2/10_errors.qmd#no-tracking).
+
+:::
+
+---
+
+## Find the next free tips from the rack itself {#next-free}
+
+::: {.recipe}
+
+Work out where the tips are when you have no saved index — a rack that was partly used, or a
+session that reconnected to a machine mid-protocol.
+
+```{python}
+#| label: cell-next-free-setup
+#| output: false
+rack_b.set_tip_state({                                      # <1>
+    **{f"{row}1": False for row in "ABCDEFGH"},
+    "A2": False, "B2": False,
+})
+```
+
+1. Standing in for a rack somebody already took ten tips from. In a real session this state arrives
+   from `load_state_from_file` ([chapter 11](../part2/11_state.qmd#save-state)) or from
+   `probe_tip_inventory` [below](#probe-consolidate).
+
+```{python}
+#| label: cell-next-free
+free = [s for s in rack_b.get_all_items() if s.has_tip()]   # <1>
+print("spots with tips:", len(free))
+print("next 8:", [s.name.split("_")[-1] for s in free[:8]]) # <2>
+
+print(rack_b.summary())                                     # <3>
+```
+
+1. `get_all_items()` returns every `TipSpot` in fill order; `has_tip()` asks that spot's tracker.
+   This is the whole "find the next tip" algorithm — PLR has no `get_next_tip()` to call.
+2. Slice off as many as you have channels and hand them straight to `pick_up_tips`.
+3. `summary()` prints the grid: **`V`** for a spot holding a tip, `-` for an empty one. `TipRack`
+   overrides `_occupied_func` to read the tracker, so this is the fastest way to eyeball where a
+   rack stands. (`plate.summary()` uses the same machinery for wells —
+   [chapter 5](../part1/05_indexing.qmd#summary-map).)
+
+```{python}
+#| label: cell-next-free-use
+#| output: false
+await lh.pick_up_tips(free[:8])
+await lh.discard_tips()
+```
+
+**Gotcha: this reads the model, not the machine.**
+
+`has_tip()` is only as good as what the trackers were told. If tracking was off for part of the run
+(it is off by default — see this chapter's setup), or a rack was unloaded by hand, the model is
+fiction and the
+filter faithfully returns fiction. `probe_tip_inventory` [below](#probe-consolidate) is the version
+that asks the hardware — on a backend that can answer.
+
+**See also:** `linear_tip_spot_generator` [above](#stream-tips) is the alternative when you *do*
+have continuity between runs — it tracks position in a file rather than re-deriving it from
+occupancy, which is the more robust of the two across a crash mid-pick-up.
 
 :::
 
@@ -441,6 +624,12 @@ Hamilton operation. Against the chatterbox it can only confirm the model against
 - `use_tips` is `async with`; `use_channels` is `with`.
 - `F.linear_tip_spot_generator(F.get_all_tip_spots([...]), cache_file_path=...)` streams across
   racks and resumes across processes. Exhaustion is `StopAsyncIteration`.
+- The streaming loop body is `fresh = await gen.get(8)` → `pick_up_tips(fresh)` → work →
+  `discard_tips()`. `async for` walks one spot at a time; `reset()` starts a run over and persists.
+- `rack.traverse(batch_size, start, direction)` works on tip racks too — a `TipRack` is an
+  `ItemizedResource`. It reads the layout, never the trackers.
+- With no saved index, the next free tips are `[s for s in rack.get_all_items() if s.has_tip()]`;
+  `rack.summary()` prints the same thing as a `V`/`-` grid.
 - `rack.empty()` / `fill()` / `set_tip_state({...})` write the model directly.
 - Tip tracking is off by default; with it off the rack model never changes.
 - `probe_tip_inventory` reports real presence only on a backend that raises `ChannelizedError`.

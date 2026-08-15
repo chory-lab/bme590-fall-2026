@@ -6,6 +6,7 @@
 # the source, so ignore both shapes.
 /_site/
 *.html
+!_edit-button.html
 *_files/
 /site_libs/
 *-listing.json
