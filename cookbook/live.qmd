@@ -1,0 +1,218 @@
+---
+title: "Run PyLabRobot in your browser"
+format:
+  html:
+    toc: false
+---
+
+This page runs a PyLabRobot 0.2.2 protocol **entirely in your browser** — the
+Python runs on WebAssembly via [Pyodide](https://pyodide.org), with no server
+behind it. The deck state is read from the running interpreter after every
+operation and rendered right here in the page.
+
+It's a proof of concept: the first load downloads Pyodide and pylabrobot
+(20–60 seconds), and the renderer is a 2-D top-down view rather than the full
+3-D visualizer. But the protocol below is real 0.2.2 code, executing in-browser.
+
+::: {.callout-note title="What you're seeing"}
+Grey boxes are carriers, the blue box is a 96-well plate, and each well's fill
+colour is its liquid volume. Tips are green. Use the buttons to step or play
+through the recording.
+:::
+
+<div id="plr-live">
+  <p id="plr-status">Loading Pyodide…</p>
+  <div id="plr-controls" style="display:none">
+    <button id="plr-prev">‹ Prev</button>
+    <button id="plr-play">Play</button>
+    <button id="plr-next">Next ›</button>
+    <button id="plr-restart">Restart</button>
+    <span id="plr-step" style="margin-left:0.75rem"></span>
+    <span id="plr-note" style="margin-left:0.75rem;font-style:italic"></span>
+  </div>
+  <div id="plr-svg-wrap" style="overflow:auto;border:1px solid #ddd;border-radius:6px;margin-top:0.5rem"></div>
+  <details style="margin-top:0.5rem">
+    <summary>Protocol log</summary>
+    <pre id="plr-log" style="max-height:180px;overflow:auto;font-size:0.8em"></pre>
+  </details>
+</div>
+
+<script type="text/x-python" id="plr-protocol">
+import json
+from pylabrobot.liquid_handling import LiquidHandler
+from pylabrobot.liquid_handling.backends import LiquidHandlerChatterboxBackend
+from pylabrobot.resources import (
+    STARLetDeck, TIP_CAR_480_A00, PLT_CAR_L5AC_A00,
+    cor_96_wellplate_360uL_Fb, hamilton_96_tiprack_1000uL_filter,
+    set_volume_tracking,
+)
+set_volume_tracking(enabled=True)
+
+def snapshot(deck):
+    items = []
+    for r in deck.get_all_children():
+        tn = type(r).__name__
+        if tn in ("TipSpot", "PlateHolder", "ResourceHolder"):
+            continue
+        if tn == "Well":
+            kind = "well"
+        elif tn == "Plate":
+            kind = "plate"
+        elif tn.endswith("Carrier"):
+            kind = "carrier"
+        elif tn == "TipRack":
+            kind = "tiprack"
+        else:
+            kind = "other"
+        al = r.get_absolute_location()
+        tr = getattr(r, "tracker", None)
+        items.append({
+            "name": r.name, "kind": kind, "type": tn,
+            "x": round(al.x, 1), "y": round(al.y, 1),
+            "w": round(r.get_size_x(), 1), "h": round(r.get_size_y(), 1),
+            "vol": getattr(tr, "volume", None),
+            "max": getattr(tr, "max_volume", None),
+        })
+    return items
+
+async def run():
+    deck = STARLetDeck()
+    tip_c = TIP_CAR_480_A00(name="tips")
+    plt_c = PLT_CAR_L5AC_A00(name="plates")
+    deck.assign_child_resource(plt_c, rails=5)
+    deck.assign_child_resource(tip_c, rails=11)
+    tip_c[0] = hamilton_96_tiprack_1000uL_filter(name="tips_0")
+    plt_c[0] = cor_96_wellplate_360uL_Fb(name="plate_0")
+
+    lh = LiquidHandler(backend=LiquidHandlerChatterboxBackend(), deck=deck)
+    await lh.setup()
+
+    snaps = []
+    plate_0 = deck.get_resource("plate_0")
+    plate_0.set_well_volumes([200.0] * 96)
+    snaps.append(snapshot(deck))
+
+    tips = deck.get_resource("tips_0")
+    await lh.pick_up_tips(tips["A1"])
+    snaps.append(snapshot(deck))
+    await lh.aspirate(plate_0["A1"], vols=[50])
+    snaps.append(snapshot(deck))
+    await lh.dispense(plate_0["B1"], vols=[50])
+    snaps.append(snapshot(deck))
+    await lh.pick_up_tips(tips["A2"])
+    snaps.append(snapshot(deck))
+    await lh.aspirate(plate_0["C1"], vols=[120])
+    snaps.append(snapshot(deck))
+    await lh.dispense(plate_0["D1"], vols=[120])
+    snaps.append(snapshot(deck))
+    await lh.return_tips()
+    snaps.append(snapshot(deck))
+    await lh.stop()
+
+    return json.dumps(snaps)
+</script>
+
+<script>
+window.addEventListener("DOMContentLoaded", async function () {
+  const $ = (id) => document.getElementById(id);
+  const status = $("plr-status");
+  const controls = $("plr-controls");
+  const log = $("plr-log");
+  const svgWrap = $("plr-svg-wrap");
+  const stepEl = $("plr-step");
+  const noteEl = $("plr-note");
+  const PROTOCOL = $("plr-protocol").textContent;
+
+  const setStatus = (t) => { status.textContent = t; };
+
+  function render(snaps, index) {
+    const items = snaps[index];
+    if (!items) return;
+    const pad = 20;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const it of items) {
+      minX = Math.min(minX, it.x); minY = Math.min(minY, it.y);
+      maxX = Math.max(maxX, it.x + it.w); maxY = Math.max(maxY, it.y + it.h);
+    }
+    minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+    const width = Math.max(400, maxX - minX);
+    const height = Math.max(200, maxY - minY);
+    const scale = Math.min(900 / width, 500 / height, 2.5);
+    const W = (maxX - minX) * scale, H = (maxY - minY) * scale;
+    const sx = (x) => (x - minX) * scale;
+    const sy = (y) => (maxY - y) * scale;
+
+    let svg = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="display:block">`;
+    svg += `<rect x="0" y="0" width="${W}" height="${H}" fill="#f6f8fa"/>`;
+    for (const it of items) {
+      const x = sx(it.x), y = sy(it.y + it.h), w = it.w * scale, h = it.h * scale;
+      if (it.kind === "carrier") {
+        svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="6" fill="#e2e8f0" stroke="#94a3b8"/>`;
+        svg += `<text x="${x + 6}" y="${y + 14}" font-size="11" fill="#475569">${it.name}</text>`;
+      } else if (it.kind === "tiprack") {
+        svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="#dcfce7" stroke="#4ade80"/>`;
+        svg += `<text x="${x + 4}" y="${y + 12}" font-size="10" fill="#166534">${it.name}</text>`;
+      } else if (it.kind === "plate") {
+        svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="4" fill="#dbeafe" stroke="#60a5fa"/>`;
+        svg += `<text x="${x + 4}" y="${y + 12}" font-size="10" fill="#1e40af">${it.name}</text>`;
+      } else if (it.kind === "well") {
+        const f = it.max ? Math.max(0, Math.min(1, it.vol / it.max)) : 0;
+        const r = Math.max(1.5, (Math.min(it.w, it.h) / 2) * scale * 0.9);
+        const a = 0.12 + 0.78 * f;
+        svg += `<circle cx="${x + w / 2}" cy="${y + h / 2}" r="${r}" fill="rgba(37,99,235,${a})" stroke="#93c5fd" stroke-width="0.5"/>`;
+      }
+    }
+    svg += "</svg>";
+    svgWrap.innerHTML = svg;
+    stepEl.textContent = `step ${index + 1} / ${snaps.length}`;
+    noteEl.textContent = index === 0 ? "deck set up, plate filled" :
+      index === 1 ? "pick up tip A1" :
+      index === 2 ? "aspirate 50 µL from A1" :
+      index === 3 ? "dispense 50 µL into B1" :
+      index === 4 ? "pick up tip A2" :
+      index === 5 ? "aspirate 120 µL from C1" :
+      index === 6 ? "dispense 120 µL into D1" :
+      "return tips, done";
+  }
+
+  let snaps = null;
+  try {
+    setStatus("Loading Pyodide (first load may take a while)…");
+    const pyodide = await loadPyodide();
+    setStatus("Loading ssl + micropip…");
+    await pyodide.loadPackage(["ssl", "micropip"]);
+    setStatus("Installing pylabrobot 0.2.2…");
+    await pyodide.runPythonAsync("import micropip; await micropip.install('pylabrobot==0.2.2')");
+    pyodide.setStdout({ batched: (s) => { log.textContent += s + "\n"; } });
+    setStatus("Running the protocol…");
+    const raw = await pyodide.runPythonAsync(PROTOCOL);
+    snaps = JSON.parse(raw);
+    log.textContent += "snapshots: " + snaps.length + "\n";
+    controls.style.display = "block";
+    status.textContent = "Done.";
+    status.style.display = "none";
+  } catch (e) {
+    status.textContent = "Error: " + e.message;
+    return;
+  }
+
+  let idx = 0, timer = null;
+  const show = (i) => { idx = Math.max(0, Math.min(snaps.length - 1, i)); render(snaps, idx); };
+  const stop = () => { if (timer) { clearInterval(timer); timer = null; $("plr-play").textContent = "Play"; } };
+
+  $("plr-prev").onclick = () => { stop(); show(idx - 1); };
+  $("plr-next").onclick = () => { stop(); show(idx + 1); };
+  $("plr-restart").onclick = () => { stop(); show(0); };
+  $("plr-play").onclick = () => {
+    if (timer) { stop(); return; }
+    $("plr-play").textContent = "Pause";
+    timer = setInterval(() => {
+      if (idx >= snaps.length - 1) { stop(); return; }
+      show(idx + 1);
+    }, 1200);
+  };
+
+  show(0);
+});
+</script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>

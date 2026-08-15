@@ -55,6 +55,7 @@ book:
         - part4/15_custom_liquid_handler.qmd
 
     - CHEATSHEET.qmd
+    - live.qmd
 
 format:
   html:
