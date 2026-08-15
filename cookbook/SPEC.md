@@ -22,7 +22,7 @@ Per-chapter implementation spec. Written so a chapter can be built without makin
    follows completed steps — not exercises. If a sentence would only make sense to someone enrolled
    in the class, it does not belong here.
 
-**Deck figures are deferred.** An embeddable deck renderer is planned (`PLAN.md` §3.7) and recipes
+**Deck figures are deferred.** An embeddable deck renderer is planned and recipes
 will eventually end with `show(lh.deck)`. Until it exists, **do not hand-roll diagrams, screenshots,
 or ASCII deck art** — write the chapter without figures and leave a `<!-- figure: deck after setup -->`
 comment where one belongs. Retrofitting is cheap; unpicking fifteen bespoke solutions is not.
@@ -236,14 +236,13 @@ import.
 ## Ch. 13 — Process and system design
 
 **Format:** seven independent microlessons, each a page or two. Not one long build.
-Full rationale in `PLAN.md` §3.5.
 
 | § | Microlesson | Key content |
 |---|---|---|
 | A | Steps and composition | Protocol as a list of steps; `@step`; checkpoint/resume; **`aspirate` is not idempotent**, so retry granularity matters |
 | B | **Recovery policy as composed decorators** — the centrepiece | Three failure tiers (transport / state / semantic) wanting three responses. Decorator order = handler precedence. Partial retry for `ChannelizedError`. Policy is reusable, plans are not |
 | C | Dry run and simulation modes | `@dry_run`; the honest limits of simulation (state, not physics) |
-| D | Logging and the run record | `PLAN.md` §3.3 as a microlesson: two handlers, `_log_command` (called 25×), `%(relativeCreated)d`, `logger.exception()`, namespace filtering |
+| D | Logging and the run record | As a microlesson: two handlers, `_log_command` (called 25×), `%(relativeCreated)d`, `logger.exception()`, namespace filtering |
 | E | Testing without hardware | Four levels: pure functions → deck assertions → protocols vs chatterbox → **record/replay via `io.capture`** (`start_capture`, `validate`). Seed the RNG. **`SaverBackend` is gone in 0.2.2; no `pylabrobot.testing` package either** |
 | F | Data management | Run IDs, timestamped dirs, `pathlib`, provenance, snapshot/resume |
 | G | Configuration | `pylabrobot.config`: `load_config`, `get_config_file`, `Config` — device addresses out of protocol code |
@@ -375,7 +374,7 @@ from pylabrobot.resources import (
 )
 ```
 
-**Renamed since 0.1.6** — the old names in `PLAN.md` §5.3 do **not** resolve:
+**Renamed since 0.1.6** — the old names do **not** resolve:
 
 | Old | Current |
 |---|---|
@@ -451,8 +450,6 @@ python -c "import pylabrobot, pathlib; print(pathlib.Path(pylabrobot.__file__).p
    find yourself reading a path with `legacy/` in it, you are in the wrong tree.
 3. **docs.pylabrobot.org may reflect a newer version than 0.2.2.** Version-pinned URLs exist
    (`/0.2.1/...`). Treat the live docs as a hint and the source as the answer.
-
-Full analysis in `../PLAN-0.2.2-AUDIT.md`.
 
 ## Package map (0.2.2)
 

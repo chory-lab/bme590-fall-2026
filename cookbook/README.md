@@ -1,7 +1,7 @@
 # The PyLabRobot Cookbook — authoring guide
 
-Quarto book. Scope, chapter list, and rationale live in `../PLAN.md` §3.
-Version facts live in `../PLAN-0.2.2-AUDIT.md`.
+Quarto book. Chapter list lives in `_quarto.yml`; the per-chapter build spec is `SPEC.md`.
+The book targets **PyLabRobot 0.2.2**; every API name is verified against the pinned install.
 
 ## Build
 
@@ -35,7 +35,7 @@ executes is wrong within a semester.
 
 ## Writing
 
-Style, voice, and the recipe format: [`docs/style_guide.md`](../docs/style_guide.md).
+Style, voice, and the recipe format: `SPEC.md`.
 
 Every recipe is registered in `recipes.yml`. `path` must match the `{#anchor}` on the heading;
 `apis` is free text so the listing's filter box matches on API names.
