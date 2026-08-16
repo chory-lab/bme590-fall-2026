@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PLR · JupyterLite bridge spike</title>
+<style>
+  html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+  #wrap { display: flex; height: 100vh; }
+  #left, #right { height: 100%; }
+  #left { flex: 1 1 55%; }
+  #right {
+    flex: 1 1 45%;
+    border-left: 1px solid #ddd;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  #right h2 {
+    margin: 0; padding: 10px 14px; font-size: 14px;
+    border-bottom: 1px solid #ddd; flex: none;
+  }
+  iframe { width: 100%; height: 100%; border: 0; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="left">
+    <iframe id="lite" src="./output/lab/index.html?path=deck.ipynb" allow="clipboard-read; clipboard-write"></iframe>
+  </div>
+  <div id="right">
+    <h2>deck</h2>
+    <iframe id="deck" src="./deck.html"></iframe>
+  </div>
+</div>
+<script src="./bridge.js"></script>
+<script>
+  // The relay between the two channels:
+  //   kernel -> widget (in #lite) -> us -> #deck
+  //   #deck -> us, #lite widget -> us  (two readiness signals)
+  //
+  // The parent owns the queue: visualizer events are held until BOTH sides are
+  // ready (deck parsed its renderer, widget mounted its frontend), then flushed
+  // in order. No timing assumptions -- a setup() burst landing before either
+  // side is ready cannot be lost.
+  const lite = document.getElementById("lite");
+  const deck = document.getElementById("deck");
+  let deckReady = false;   // DECK_READY: the deck iframe parsed lib.js
+  let bridgeReady = false; // BRIDGE_READY: the widget frontend mounted
+  const queue = [];
+
+  function flush() {
+    if (!(deckReady && bridgeReady)) return;
+    queue.splice(0).forEach((m) => deck.contentWindow.postMessage(m, "*"));
+    // Tell the widget it may unmute Python's replay.
+    lite.contentWindow.postMessage({ __plrReady: true }, "*");
+  }
+
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (!d) return;
+
+    // The deck iframe has parsed the renderer.
+    if (d.__plrReady) { deckReady = true; flush(); return; }
+    // The bridge widget has mounted its frontend.
+    if (d.__plrBridgeUp) { bridgeReady = true; flush(); return; }
+    // Visualizer events from the kernel, to be rendered by the deck.
+    if (typeof d.__plrEvent === "string") {
+      if (deckReady && bridgeReady) deck.contentWindow.postMessage(d, "*");
+      else queue.push(d);
+      return;
+    }
+    // Ack traffic from the deck.
+    if (d.__plrAck) console.log("[plr] deck ack:", d.__plrAck);
+  });
+</script>
+</body>
+</html>

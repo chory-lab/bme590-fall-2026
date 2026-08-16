@@ -30,3 +30,13 @@ plr_workshops/_vendored/
 
 # pyodide, a devDependency used only by test_demo_pyodide.mjs.
 node_modules/
+
+# JupyterLite spike build output (rebuilt by jupyterlite/build.py).
+jupyterlite/output/
+
+# The deck iframe document, generated host-side by build.py from the installed
+# PyLabRobot (frontend.build_page). Rebuilt with the site; never committed.
+jupyterlite/deck.html
+
+# setuptools temp dir left by `pip wheel` (building the kernel wheel).
+build/
