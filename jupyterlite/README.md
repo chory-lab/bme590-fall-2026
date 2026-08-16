@@ -47,12 +47,21 @@ you move the build output. (The repo copy of `drive.cjs` is the source of truth;
 
 ## What the spike proves
 
-1. anywidget comms work in a JupyterLite (Pyodide **worker**) kernel — the
-   `BridgeProbe` widget in `content/counter.ipynb` mounts and displays.
-2. The widget's JS reaches the parent page: each `probe.ping(...)` call forwards
-   a message to `outer.html`'s right panel. That is exactly the hop our deck
-   iframe will consume.
+All of it, end-to-end in a headless Chrome (`drive.cjs`):
 
-Next milestone: replace the message panel with the real deck iframe
-(`frontend.build_page()`) and swap `BridgeProbe` for `InlineVisualizer` +
-`AnyWidgetTransport` forwarding to `parent`.
+1. Python executes in a JupyterLite (Pyodide worker) kernel.
+2. `piplite.install("bme590-workshops==0.1.0")` resolves hermetically — the
+   package's metadata is now the browser-truthful set (`anywidget`,
+   `pylabrobot==0.2.2`), so no `deps=False`; numpy/pandas/pillow ship in
+   Pyodide's own lockfile.
+3. `JupyterLiteBridgeTransport` mounts and forwards every event to the parent.
+4. The deck iframe renders the protocol: **16 events acked `success:true`,
+   754 Konva shapes** (STARLet deck, 96-tip rack, head state, volumes).
+
+The two channels: `jupyter-iframe-commands` drives `notebook:run-all-cells`
+(control), and the bridge widget's `postMessage` carries the visualizer events
+(app). The parent owns a ready queue so no timing race.
+
+`deck.ipynb` is the synthetic protocol used to prove the bridge; the real
+workshops are the next milestone (their `time.sleep()`s must become
+`await asyncio.sleep()` first).

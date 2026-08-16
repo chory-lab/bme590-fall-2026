@@ -22,16 +22,11 @@ md(
 )
 
 code(
-    "# pylabrobot and anywidget: resolve their REAL deps (typing_extensions,\n"
-    "# websockets / ipywidgets, traitlets, ...) from the bundled index -- every one\n"
-    "# is there, so the resolver stays hermetic. bme590-workshops: deps=False -- the\n"
-    "# general-purpose wheel's metadata (jupyterlab, sidecar, numpy, ...) is for a\n"
-    "# desktop install, not the browser; piplite.install(..., deps=False) is the\n"
-    "# supported API for exactly this.\n"
+    "# The wheel's metadata is now the browser-truthful set (anywidget, pylabrobot),"
+    "# so the resolver does the work -- no deps=False. numpy/pandas/pillow ship in"
+    "# Pyodide's own lockfile, not this index.\n"
     "import piplite\n"
-    "await piplite.install(\"pylabrobot==0.2.2\")\n"
-    "await piplite.install(\"anywidget==0.11.0\")\n"
-    "await piplite.install(\"bme590-workshops==0.1.0\", deps=False)\n"
+    "await piplite.install(\"bme590-workshops==0.1.0\")\n"
     "import pylabrobot\n"
     'print("PLR", pylabrobot.__version__)'
 )
