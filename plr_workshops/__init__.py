@@ -8,10 +8,12 @@ test harness with no browser at all.
 
 from .frontend import build_page, build_replay_page
 from .inline import InlineVisualizer
+from .pyodide_transport import PyodideTransport
 from .transport import RecordingTransport, VisualizerTransport
 
 __all__ = [
   "InlineVisualizer",
+  "PyodideTransport",
   "RecordingTransport",
   "VisualizerTransport",
   "build_page",

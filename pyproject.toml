@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bme590-workshops"
+version = "0.1.0"
+description = "Browser-runnable tooling and one-command launcher for the BME 590 PyLabRobot workshops"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  # Same pin as environment.yaml: dd79c4c is the 0.2.2 release commit.
+  "pylabrobot[visualizer,opentrons] @ git+https://github.com/PyLabRobot/pylabrobot.git@dd79c4c",
+  "jupyterlab>=4",
+  "sidecar>=0.7",
+  "anywidget>=0.9",
+  "nbformat>=5",
+  "numpy",
+  "pandas",
+  "pillow",
+]
+
+[project.scripts]
+plr-workshops = "plr_workshops.cli:main"
+
+[tool.setuptools]
+packages = ["plr_workshops"]
+
+[tool.setuptools.package-data]
+plr_workshops = ["*.py"]
+
+# The workshops reference ../figs and ../data relative to workshops/, so all
+# three ship together under share/bme590-workshops in the installed location.
+[tool.setuptools.data-files]
+"share/bme590-workshops/workshops" = ["workshops/*.ipynb"]
+"share/bme590-workshops/data" = ["data/*.csv"]
+"share/bme590-workshops/figs" = ["figs/*"]
+
+[tool.setuptools.exclude-package-data]
+"*" = []
