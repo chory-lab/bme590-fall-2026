@@ -21,3 +21,12 @@ site/
 
 # Static Pyodide demo (build artifact of plr_workshops/build_demo.py).
 demo/
+
+# Third-party assets fetched by plr_workshops/vendor.py so the demo runs with
+# no network. Both are build output: `python -m plr_workshops.build_demo`
+# recreates them, and the cache makes a rebuild itself offline.
+.vendor-cache/
+plr_workshops/_vendored/
+
+# pyodide, a devDependency used only by test_demo_pyodide.mjs.
+node_modules/

@@ -14,7 +14,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -24,15 +24,17 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.dirname(HERE);
 const PY_DIR = path.join(REPO, "demo", "py", "plr_workshops");
 
+// pyodide is a devDependency in package.json, so `npm install` puts it in
+// ./node_modules. It used to fall back to a throwaway spike under the system
+// temp directory -- one cleanup away from silently taking the most valuable
+// suite in the repo offline.
 const CANDIDATES = [
   process.env.PYODIDE_DIR,
   path.join(REPO, "node_modules", "pyodide"),
-  path.join(HERE, "node_modules", "pyodide"),
-  "C:/Users/stefa/AppData/Local/Temp/opencode/pyodide-spike/node_modules/pyodide",
 ].filter(Boolean);
 const PYODIDE_DIR = CANDIDATES.find((p) => existsSync(path.join(p, "pyodide.mjs")));
 if (!PYODIDE_DIR) {
-  console.error("pyodide package not found; set PYODIDE_DIR. Looked in:\n  " +
+  console.error("pyodide package not found -- run `npm install`. Looked in:\n  " +
                 CANDIDATES.join("\n  "));
   process.exit(2);
 }
@@ -103,12 +105,23 @@ const pyodide = await loadPyodide({ indexURL: PYODIDE_DIR });
 await pyodide.loadPackage(["micropip", "ssl"], { messageCallback: () => {} });
 await pyodide.runPythonAsync('import micropip; await micropip.install("pylabrobot==0.2.2")');
 
-const PY_MODULES = ["__init__.py", "transport.py", "inline.py", "frontend.py",
-                    "pyodide_transport.py", "browser_kernel.py"];
+// Read the built bundle rather than listing modules again. Three copies of this
+// list already existed (build_demo._NEEDED, the page's PY_MODULES, and here),
+// and the day vendor.py was added to two of them this suite failed with an
+// ImportError that pointed nowhere near the cause.
 pyodide.FS.mkdir("/home/pyodide/plr_workshops");
-for (const f of PY_MODULES) {
+for (const f of readdirSync(PY_DIR).filter((f) => f.endsWith(".py"))) {
   pyodide.FS.writeFile(`/home/pyodide/plr_workshops/${f}`,
                        readFileSync(path.join(PY_DIR, f), "utf-8"));
+}
+// Assets frontend.py inlines into the visualizer page. Binary: one is a PNG.
+const VENDORED = path.join(PY_DIR, "_vendored");
+if (existsSync(VENDORED)) {
+  pyodide.FS.mkdir("/home/pyodide/plr_workshops/_vendored");
+  for (const f of readdirSync(VENDORED)) {
+    pyodide.FS.writeFile(`/home/pyodide/plr_workshops/_vendored/${f}`,
+                         new Uint8Array(readFileSync(path.join(VENDORED, f))));
+  }
 }
 const kernel = pyodide.pyimport("plr_workshops.browser_kernel");
 

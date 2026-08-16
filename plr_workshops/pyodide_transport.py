@@ -27,6 +27,9 @@ class PyodideTransport(VisualizerTransport):
     height: Iframe height in pixels. The default, ``None``, fills the container,
       which is what a docked deck panel wants; pass an integer when the
       container has no height of its own.
+    chrome: How much of the visualizer's own furniture to show. See
+      :func:`~plr_workshops.frontend.build_page`. The demo's deck pane is about
+      half the window, so the default hides everything but the deck.
   """
 
   def __init__(
@@ -35,11 +38,13 @@ class PyodideTransport(VisualizerTransport):
     name: str = "PyLabRobot",
     liquid_color: str = "F39C12",
     height=None,
+    chrome: str = "deck",
   ):
     self._container_id = container_id
     self._name = name
     self._liquid_color = liquid_color
     self._height = height
+    self._chrome = chrome
     self._iframe = None
     self._on_message = None
     self._ready = False
@@ -51,7 +56,9 @@ class PyodideTransport(VisualizerTransport):
     from js import document, window
     from pyodide.ffi import create_proxy
 
-    page = build_page(name=self._name, liquid_color=self._liquid_color)
+    page = build_page(
+      name=self._name, liquid_color=self._liquid_color, chrome=self._chrome
+    )
 
     container = document.getElementById(self._container_id)
     if container is None:

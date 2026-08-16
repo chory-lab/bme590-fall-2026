@@ -228,6 +228,12 @@ const DB_KEY = "notebook-v3";
 
 let pyodide = null;
 let kernel = null;        // the plr_workshops.browser_kernel module proxy
+// Boot takes ~9 s, and the toolbar is live the whole time. Anything that needs
+// the kernel awaits this instead of testing `kernel` and giving up: a click at
+// t=2 s has to run at t=9 s, not silently do nothing.
+let bootFailure = null;
+let markBooted;
+const booted = new Promise((resolve) => { markBooted = resolve; });
 let model = null;
 let mode = "command";     // "command" | "edit"
 let runningId = null;     // cell currently executing, for stdout routing
@@ -518,9 +524,29 @@ function runCell(id) {
   }
   return enqueue(async () => {
     const c = model.get(id);
-    if (!c || !kernel) return;
+    if (!c) return;
     c.source = editors.get(id) ? editors.get(id).getValue() : c.source;
     if (!c.source.trim()) return;
+
+    // Queued behind a boot that has not finished. Say so, then wait -- the
+    // alternative (return quietly) looks exactly like a cell that ran and
+    // produced nothing, which is how "Run all does nothing" used to happen.
+    if (!kernel) {
+      c.execCount = "*";
+      refreshPrompt(c);
+      setKernel("queued — waiting for the kernel", "starting");
+      await booted;
+    }
+    if (!kernel) {
+      model.addOutput(id, errorOutput(
+        "KernelError: the Python kernel failed to start, so this cell did not run.\n" +
+        (bootFailure ? String(bootFailure) : "")
+      ));
+      c.execCount = null;
+      refreshPrompt(c);
+      renderOutputs(c);
+      return;
+    }
 
     model.beginExec(id);
     const count = c.execCount;
@@ -568,6 +594,7 @@ function runAll() {
 }
 
 async function restartKernel() {
+  await booted;
   if (!kernel) return;
   await enqueue(async () => {
     kernel.reset();
@@ -723,14 +750,32 @@ document.getElementById("file-open").addEventListener("change", async (e) => {
  * ------------------------------------------------------------------ */
 const PY_MODULES = [
   "__init__.py", "transport.py", "inline.py", "frontend.py",
-  "pyodide_transport.py", "browser_kernel.py",
+  "pyodide_transport.py", "browser_kernel.py", "vendor.py",
 ];
+
+// Inlined into the visualizer page by frontend.py, which runs *inside* Pyodide
+// and so can only read what we have put in its filesystem. build_demo.py
+// rewrites this list from the directory it actually ships, so the two cannot
+// drift apart.
+const PY_VENDOR = ["konva.min.js"];
 
 async function loadPlrWorkshops() {
   const dir = "/home/pyodide/plr_workshops";
   try { pyodide.FS.mkdir(dir); } catch (_) { /* already there */ }
+  try { pyodide.FS.mkdir(dir + "/_vendored"); } catch (_) { /* already there */ }
+  // Bytes, not text: one of these is a PNG, and decoding it as UTF-8 would
+  // quietly corrupt it into an unreadable image.
+  const vendored = await Promise.all(PY_VENDOR.map(async (f) => {
+    const resp = await fetch(`py/plr_workshops/_vendored/${f}`, { cache: "no-store" });
+    if (!resp.ok) throw new Error(`could not fetch py/plr_workshops/_vendored/${f}`);
+    return [f, new Uint8Array(await resp.arrayBuffer())];
+  }));
+  for (const [f, bytes] of vendored) pyodide.FS.writeFile(`${dir}/_vendored/${f}`, bytes);
   const sources = await Promise.all(PY_MODULES.map(async (f) => {
-    const resp = await fetch(`py/plr_workshops/${f}`);
+    // no-store, not the default: these are build output that changes every time
+    // build_demo.py runs, and the HTTP cache will otherwise serve yesterday's
+    // module after a rebuild -- an edit that silently does nothing on reload.
+    const resp = await fetch(`py/plr_workshops/${f}`, { cache: "no-store" });
     if (!resp.ok) throw new Error(`could not fetch py/plr_workshops/${f}`);
     return [f, await resp.text()];
   }));
@@ -752,8 +797,13 @@ async function boot() {
     api.pyodide = pyodide;
     setKernel("idle");
   } catch (e) {
-    setKernel("failed to start: " + (e && e.message ? e.message : e), "error");
+    bootFailure = e && e.message ? e.message : e;
+    setKernel("failed to start: " + bootFailure, "error");
     console.error(e);
+  } finally {
+    // Always settle, success or not: anything waiting on the kernel has to be
+    // released, or a failed boot leaves every queued cell hanging on "*".
+    markBooted();
   }
 }
 
@@ -783,7 +833,10 @@ async function boot() {
     toIpynb: () => toIpynb(model),
     loadIpynb: (nb) => { model = fromIpynb(nb); render(); },
     reset: () => { model = new NotebookModel(STARTER_CELLS); render(); scheduleSave(); },
-    ready: () => kernel != null,
+    // A promise, not a predicate. `await ready()` used to resolve instantly on a
+    // boolean, so a harness would drive a page whose kernel did not exist yet
+    // and every cell would quietly no-op.
+    ready: () => booted.then(() => kernel != null),
   });
 
   boot();

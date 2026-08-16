@@ -78,6 +78,9 @@ class AnyWidgetTransport(VisualizerTransport):
       any ``sidecar`` anchor (``"split-right"``, ``"right"``, ``"split-bottom"``,
       ...) opens a dockable panel beside the notebook.
     title: Panel title when docked.
+    chrome: How much of the visualizer's own furniture to show. See
+      :func:`~plr_workshops.frontend.build_page`. A docked panel is narrow, so
+      the default hides everything but the deck.
   """
 
   def __init__(
@@ -87,22 +90,30 @@ class AnyWidgetTransport(VisualizerTransport):
     height: int = 600,
     dock: Optional[str] = "split-right",
     title: str = "Deck",
+    chrome: str = "deck",
   ):
     self.widget = VisualizerWidget(
-      page=build_page(name=name, liquid_color=liquid_color), height=height
+      page=build_page(name=name, liquid_color=liquid_color, chrome=chrome), height=height
     )
     self._dock = dock
     self._title = title
     self._sidecar = None
     # Events emitted before the frontend finishes loading -- setup() sends the
-    # whole deck before the iframe has parsed -- are replayed on its ready signal.
+    # whole deck before the iframe has parsed -- are replayed on its ready
+    # signal. Only those: once the iframe is live every event goes straight
+    # through, so the backlog is dropped instead of growing for the whole
+    # session. A long protocol emits one message per liquid-handling step, and
+    # retaining all of them was the one place this leaked.
     self._log: List[str] = []
+    self._ready = False
     self.widget.on_msg(self._on_frontend_message)
 
   def _on_frontend_message(self, _widget, content, _buffers):
     if isinstance(content, dict) and content.get("ready"):
       for message in self._log:
         self.widget.send({"__plrEvent": message})
+      self._log.clear()
+      self._ready = True
 
   async def start(self) -> None:
     from IPython.display import display
@@ -117,7 +128,8 @@ class AnyWidgetTransport(VisualizerTransport):
       display(self.widget)
 
   async def emit(self, message: str) -> None:
-    self._log.append(message)
+    if not self._ready:
+      self._log.append(message)
     self.widget.send({"__plrEvent": message})
 
   async def stop(self) -> None:
@@ -125,3 +137,4 @@ class AnyWidgetTransport(VisualizerTransport):
       self._sidecar.close()
       self._sidecar = None
     self._log.clear()
+    self._ready = False

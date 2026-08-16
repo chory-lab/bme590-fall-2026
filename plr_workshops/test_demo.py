@@ -29,7 +29,6 @@ def main():
     for expected in (
       "loadPyodide",
       "micropip.install",
-      "pylabrobot==0.2.2",
       "plr-deck",
       "indexedDB",
       "a.download",
@@ -46,6 +45,49 @@ def main():
       "dblclick",                # markdown cells edit like Jupyter's
     ):
       assert expected in html, f"index.html missing {expected!r}"
+
+    # -- clicking Run all during the ~9 s boot must not silently do nothing --
+    # `ready()` returning a bare boolean made `await ready()` resolve instantly,
+    # after which every cell hit an `if (!kernel) return` and produced no output
+    # and no error. Both halves are asserted: the promise, and the absence of
+    # the bail-out.
+    assert "booted.then(" in html, "ready() must resolve a promise, not a boolean"
+    assert "await booted" in html, "cell runs must wait for the kernel"
+    assert "markBooted()" in html, "the boot promise must settle even when boot fails"
+    assert not re.search(r"if \(!c \|\| !kernel\) return", html), (
+      "runCell must not abandon a cell just because the kernel is still booting"
+    )
+    assert "queued — waiting for the kernel" in html, "a queued cell must say so"
+
+    # -- the bundle must boot with no network at all --
+    # unresolved_local_refs() only ever looked at *relative* paths, which is
+    # exactly why five CDN dependencies went unnoticed until someone tried this
+    # without wifi. Everything absolute is a boot-time network dependency.
+    from .frontend import remote_refs
+
+    assert not remote_refs(html), f"the built page still fetches {remote_refs(html)}"
+    assert 'indexURL: "pyodide/"' in html, (
+      "without indexURL the local pyodide.js still pulls its wasm from the CDN"
+    )
+    assert re.search(r'micropip\.install\(\["wheels/pylabrobot-[^"]+\.whl"', html), (
+      "pylabrobot must install from the vendored wheel, not PyPI"
+    )
+    assert "deps=False" in html, "dependency resolution would go back to the network"
+
+    for rel in ("pyodide/pyodide.asm.wasm", "pyodide/python_stdlib.zip",
+                "pyodide/pyodide-lock.json", "vendor/codemirror.min.js",
+                "py/plr_workshops/_vendored/konva.min.js"):
+      assert (out / rel).is_file(), f"vendored asset missing: {rel}"
+    assert list((out / "wheels").glob("pylabrobot-*.whl")), "pylabrobot wheel not vendored"
+
+    # Every local URL the page names must exist in the bundle.
+    for ref in re.findall(r'["\'`](?:\./)?((?:pyodide|vendor|wheels)/[A-Za-z0-9_.\-]+)["\'`]', html):
+      assert (out / ref).is_file(), f"page references missing {ref}"
+
+    # -- the demo's own Python is build output; the HTTP cache must not pin it --
+    assert 'cache: "no-store"' in html, (
+      "py/ modules must be fetched uncached, or a rebuild has no effect on reload"
+    )
 
     # -- the engine: model, nbformat, keymap and the starter protocol --
     for expected in (
