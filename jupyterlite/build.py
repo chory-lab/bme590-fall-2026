@@ -205,6 +205,57 @@ def _expose_app(out_dir: Path) -> None:
     print(f"  probe: exposeAppInBrowser -> {path.name}")
 
 
+# Everything build.py shells out to or imports, with the reason it is needed.
+# Checked before any work starts.
+#
+# The failure this prevents: a tool installed by hand locally, never recorded in
+# requirements-build.txt, so the build works on the machine that wrote it and
+# dies on a clean runner. That has now happened twice -- the jupyterlite
+# metapackage (`python -m jupyterlite`) and jupyterlab (`jupyter labextension
+# build`) -- and both times the error arrived a minute into the build, phrased
+# in terms of a missing subcommand rather than a missing dependency.
+#
+# Note what is asserted: the *capability*, not the version list. A version check
+# against requirements-build.txt would be circular, since installing from that
+# file makes it true by construction.
+_REQUIRED_TOOLS = (
+    ("nbformat", "module", "reading and writing the workshop notebooks"),
+    ("jupyterlite", "module", "`python -m jupyterlite build` (the metapackage, not jupyterlite-core)"),
+    ("jupyterlite_pyodide_kernel", "module", "the Python kernel in the browser"),
+    ("jupyterlab", "module", "`jupyter labextension build` for the bootstrap extension"),
+    ("anywidget", "module", "the deck bridge widget's labextension"),
+    ("pylabrobot", "module", "generating deck.html host-side"),
+    ("npm", "exe", "compiling the bootstrap extension"),
+)
+
+
+def _preflight() -> None:
+    """Fail before doing any work if a build dependency is absent."""
+    import importlib.util
+
+    missing = []
+    for name, kind, why in _REQUIRED_TOOLS:
+        if kind == "exe":
+            found = shutil.which(name) is not None
+        else:
+            found = importlib.util.find_spec(name) is not None
+        if not found:
+            missing.append((name, why))
+
+    if missing:
+        listing = ''.join(
+            f"  {name:28} needed for {why}\n" for name, why in missing
+        )
+        raise SystemExit(
+            f"build dependencies missing:\n{listing}"
+            f"  Install the build environment:\n"
+            f"    {sys.executable} -m pip install -r "
+            f"jupyterlite/requirements-build.txt\n"
+            "  (npm comes from Node.js, which that file cannot install.)"
+        )
+    print(f"  preflight OK: {len(_REQUIRED_TOOLS)} build dependencies present")
+
+
 def _build_bootstrap_extension() -> Path:
     """Build the plr-workshops:bootstrap labextension; return its output folder.
 
@@ -344,6 +395,8 @@ def main():
 
     global _PROBE
     _PROBE = args.probe
+
+    _preflight()
 
     if args.refresh_wheels:
         subprocess.run([sys.executable, "-c", _FETCH_WHEELS], cwd=HERE, check=True)
