@@ -109,14 +109,27 @@ def _workshops() -> None:
             continue
         nb = nbformat.read(src, as_version=4)
         bootstrap = nbformat.v4.new_code_cell(_BOOTSTRAP % {"ot_names": list(_OT_DEFS)})
-        # Hidden by default: this is plumbing, not coursework. Students see the
-        # workshop title first; the cell still runs, and the disclosure arrow
-        # opens it for anyone who wants to read it.
-        bootstrap.metadata["jupyter"] = {"source_hidden": True}
         bootstrap.metadata["tags"] = ["browser-bootstrap"]
-        # The workshop's first cell is a markdown title; insert before it so the
-        # bootstrap runs first.
+        # Visible, and announced by the note above it.
+        #
+        # This cell was briefly `source_hidden`, on the reasoning that install
+        # plumbing is not coursework. That turned it into a one-line grey strip
+        # above the title -- easy to scroll past, and skipping it makes every
+        # later cell fail with "No module named pylabrobot", which reads like a
+        # broken site rather than a cell you forgot to run. Hiding six lines was
+        # never the point: the clutter worth removing was the 7.8 KB of CSV
+        # literals, and that is gone.
+        note = nbformat.v4.new_markdown_cell(
+            "### ▶ Run this cell first\n"
+            "\n"
+            "It installs PyLabRobot in your browser and points the visualizer at "
+            "the deck panel. It takes a few seconds, and only needs to run once "
+            "per session — but every cell below depends on it.\n"
+        )
+        # The workshop's own first cell is a markdown title; insert before it so
+        # the bootstrap runs ahead of any workshop code.
         nb.cells.insert(0, bootstrap)
+        nb.cells.insert(0, note)
         _strip_outputs(nb)
         nb.metadata["kernelspec"] = dict(_BROWSER_KERNELSPEC)
         nbformat.write(nb, workshops / src.name)
