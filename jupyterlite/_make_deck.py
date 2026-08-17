@@ -108,7 +108,12 @@ nb = {
     "nbformat_minor": 5,
 }
 
-out = r"C:\Users\stefa\plr-class\bme590-fall-2025\jupyterlite\content\deck.ipynb"
+import os
+
+# Relative to this file, not an absolute path on one machine -- build.py calls
+# this on every build so the fixture cannot silently go missing again.
+out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "content", "deck.ipynb")
+os.makedirs(os.path.dirname(out), exist_ok=True)
 with open(out, "w", encoding="utf-8") as fh:
     fh.write(json.dumps(nb, indent=1))
 print("wrote deck.ipynb", len(cells), "cells")

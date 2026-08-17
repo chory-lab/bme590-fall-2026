@@ -38,6 +38,9 @@ WORKSHOPS = [REPO / "workshops" / p for p in
 # that 404 once before JupyterLab retries them under /files/.
 WORKSHOP_SUBDIR = "workshops"
 
+# Set by main() from --probe; see _make_probe.py.
+_PROBE = False
+
 _BOOTSTRAP = """\
 # Browser bootstrap: install the package and swap the stock Visualizer for the
 # bridge-backed one, so the workshop cells below run unmodified.
@@ -111,6 +114,73 @@ def _workshops() -> None:
             shutil.copytree(REPO / name, content / name, dirs_exist_ok=True)
             print(f"  {name} -> content/{name}")
 
+    # The synthetic bridge fixture. Small, known-good, and independent of the
+    # workshops: when the real notebooks stop painting the deck, running this
+    # one says immediately whether the bridge broke or the workshop did. It was
+    # previously an untracked leftover in content/, so a clean rebuild lost it.
+    subprocess.run([str(python()), str(HERE / "_make_deck.py")], cwd=HERE, check=True)
+
+    # Execution probes. Diagnostic only, and off by default -- students should
+    # not find a probe_00.ipynb next to their coursework.
+    if _PROBE:
+        subprocess.run([str(python()), str(HERE / "_make_probe.py")], cwd=HERE, check=True)
+
+
+# Federated extensions the site cannot work without. A JupyterLite build does
+# not fail, or even warn, when one of these is simply not installed in the build
+# environment -- it produces a complete, healthy-looking site with a piece of
+# the machinery quietly missing.
+#
+# That is not hypothetical: CI's dependency list omitted `anywidget`, so the
+# deployed site had no anywidget labextension. The bridge widget *is* an
+# anywidget, so it could not render, so it never posted __plrBridgeUp, so the
+# parent page never flushed its event queue and the deck stayed blank. Kernel
+# fine, deck fine, wire missing -- and every artifact check CI ran still passed.
+REQUIRED_EXTENSIONS = {
+    "@jupyterlite/pyodide-kernel-extension":  "the Python kernel",
+    "@jupyter-widgets/jupyterlab-manager":    "ipywidgets rendering",
+    "anywidget":                              "the deck bridge widget",
+    "jupyter-iframe-commands":                "the host control channel",
+}
+
+
+def _check_extensions(out_dir: Path) -> None:
+    """Fail the build if a load-bearing labextension did not make it in."""
+    import json as _json
+
+    config = _json.loads((out_dir / "jupyter-lite.json").read_text(encoding="utf-8"))
+    built = {e["name"] for e in config["jupyter-config-data"].get("federated_extensions", [])}
+    missing = {k: v for k, v in REQUIRED_EXTENSIONS.items() if k not in built}
+    if missing:
+        raise SystemExit(
+            "federated extensions missing from the build:\n"
+            + "".join(f"  {name}  ({why})\n" for name, why in missing.items())
+            + "  Install the build environment from jupyterlite/requirements-build.txt."
+        )
+    print(f"  extensions OK: {len(built)} federated, all {len(REQUIRED_EXTENSIONS)} required present")
+
+
+def _expose_app(out_dir: Path) -> None:
+    """Set ``exposeAppInBrowser`` so a driver can read the notebook model.
+
+    Without it there is no ``window.jupyterapp``, and the only way to see what
+    a cell did is to scrape ``.jp-Cell-outputArea`` out of the DOM -- which
+    lies, because JupyterLab windows the notebook and a cell below the fold has
+    no output area at all. Printing from Python does not help either: the
+    Pyodide kernel runs in a Web Worker, so ``js.console.log`` never reaches the
+    page console a CDP driver is attached to.
+
+    Diagnostic builds only. The student site should not hand a global handle on
+    the whole application to any script on the page.
+    """
+    import json as _json
+
+    path = out_dir / "jupyter-lite.json"
+    config = _json.loads(path.read_text(encoding="utf-8"))
+    config["jupyter-config-data"]["exposeAppInBrowser"] = True
+    path.write_text(_json.dumps(config, indent=2), encoding="utf-8")
+    print(f"  probe: exposeAppInBrowser -> {path.name}")
+
 
 def _strip_outputs(nb) -> None:
     """Clear saved outputs and execution counts.
@@ -133,7 +203,12 @@ def main():
                         help="Assemble a Pages-servable root here after building")
     parser.add_argument("--refresh-wheels", action="store_true",
                         help="Re-download wheels into pypi/ from PyPI")
+    parser.add_argument("--probe", action="store_true",
+                        help="Also ship probe_00.ipynb (execution probes; diagnostic)")
     args = parser.parse_args()
+
+    global _PROBE
+    _PROBE = args.probe
 
     if args.refresh_wheels:
         subprocess.run([sys.executable, "-c", _FETCH_WHEELS], cwd=HERE, check=True)
@@ -174,6 +249,11 @@ def main():
         sys.stderr.write(proc.stderr)
         raise SystemExit(f"jupyterlite build failed: rc={proc.returncode}")
     print(f"\nbuilt -> {out_dir}")
+
+    _check_extensions(out_dir)
+
+    if _PROBE:
+        _expose_app(out_dir)
 
     if args.deploy:
         _assemble_deploy(Path(args.deploy), out_dir)

@@ -10,7 +10,7 @@ const path = require("path");
 
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const PORT = 9333;
-const NOTEBOOK = process.env.PLR_NB || "00_plr_introduction.ipynb";
+const NOTEBOOK = process.env.PLR_NB || "workshops/00_plr_introduction.ipynb";
 const BASE = process.env.PLR_URL || "http://127.0.0.1:8812/outer.html";
 const URL = `${BASE}?nb=${NOTEBOOK}`;
 
@@ -264,8 +264,65 @@ async function main() {
       });
       return out;
     })()`).catch((e) => ["read failed: " + e.message]);
-    console.log("=== cell outputs ===");
+    console.log("=== cell outputs (DOM -- windowed, incomplete) ===");
     for (const o of cellOutputs) console.log("  ", o);
+
+    // The authoritative read. The DOM version above only sees cells JupyterLab
+    // has rendered: the notebook is windowed, so a cell below the fold has no
+    // output area at all and is indistinguishable from a cell that ran and
+    // printed nothing. That ambiguity is worth several hours if you meet it
+    // unaware -- it reads exactly like the protocol cells silently failing.
+    //
+    // The model carries every cell regardless of what is on screen, plus the
+    // execution count and the error name/value that the DOM read drops.
+    const cellModel = await evalJS(`(() => {
+      const w = document.querySelector('#lite').contentWindow;
+      const app = w.jupyterapp || w.jupyterlab;
+      if (!app) return { err: "no app global on the JupyterLite window" };
+      // Not shell.currentWidget: by the time we read, focus may have moved to
+      // the completer probe's target or a launcher tab. Search the main area
+      // for the notebook instead.
+      let panel = null;
+      for (const w of app.shell.widgets("main")) {
+        if (w.content && w.content.model && w.content.model.cells) { panel = w; break; }
+      }
+      const model = panel && panel.content.model;
+      if (!model) return { err: "no notebook widget in the main area" };
+      const cells = [];
+      for (let i = 0; i < model.cells.length; i++) {
+        const cell = model.cells.get(i);
+        if (cell.type !== "code") continue;
+        const outputs = cell.outputs;
+        const texts = [];
+        let ename = null, evalue = null;
+        for (let j = 0; j < outputs.length; j++) {
+          const o = outputs.get(j).toJSON();
+          if (o.output_type === "stream") texts.push(String(o.text).slice(0, 300));
+          else if (o.output_type === "error") { ename = o.ename; evalue = o.evalue; }
+          else if (o.data && o.data["text/plain"]) texts.push(String(o.data["text/plain"]).slice(0, 300));
+        }
+        cells.push({
+          i,
+          exec: cell.executionCount,
+          nOut: outputs.length,
+          stdout: texts.join(" | ").replace(/\\s+/g, " ").slice(0, 300),
+          ename, evalue,
+          src: cell.sharedModel.getSource().split("\\n")[0].slice(0, 60),
+        });
+      }
+      return { cells };
+    })()`).catch((e) => ({ err: e.message }));
+
+    console.log("=== cell model (authoritative) ===");
+    if (cellModel.err) {
+      console.log("   unavailable:", cellModel.err);
+    } else {
+      for (const c of cellModel.cells) {
+        const err = c.ename ? `  ERROR ${c.ename}: ${c.evalue}` : "";
+        console.log(`   [${c.exec === null ? " " : c.exec}] outs=${c.nOut} ${JSON.stringify(c.src)}${err}`);
+        if (c.stdout) console.log(`        stdout: ${c.stdout}`);
+      }
+    }
 
     // The real proof: did the DECK iframe render? Check the Konva stage inside it.
     const deckState = await evalJS(`(() => {

@@ -42,20 +42,29 @@ jobs:
           python-version: "3.11"
 
       - name: Install the build environment
-        # pylabrobot (deck.html), the JupyterLite CLI + toolchain, and Pillow
-        # (navbar logo shrink) all run host-side; numpy/pandas/pillow for the
-        # *kernel* ship inside Pyodide's own lockfile. The vendored visualizer
-        # assets (konva + shrunk logo) are committed, so no network fetch.
+        # pylabrobot (deck.html) and Pillow (navbar logo shrink) run host-side;
+        # numpy/pandas/pillow for the *kernel* ship inside Pyodide's own
+        # lockfile. The vendored visualizer assets (konva + shrunk logo) are
+        # committed, so no network fetch.
+        #
+        # The JupyterLite toolchain comes from requirements-build.txt, which is
+        # the same file the local README tells you to install. This list used to
+        # be maintained separately here and had drifted in two ways that both
+        # shipped to students:
+        #
+        #   * `anywidget` was missing entirely, so the built site had no
+        #     anywidget labextension -- and the bridge widget is an anywidget.
+        #     It could not render, so it never posted __plrBridgeUp, so the
+        #     parent never flushed its queue and the deck stayed blank. The
+        #     kernel and the deck were both fine; only the wire between them
+        #     was absent.
+        #   * `jupyterlite-pyodide-kernel` was unpinned and resolved to 0.8.3,
+        #     which is built against JupyterLab 4.6.1 while jupyterlite 0.8.1
+        #     ships 4.6.0 -- a federation-runtime warning on every boot.
         run: |
           pip install --upgrade pip
-          pip install \
-            "pylabrobot==0.2.2" \
-            pillow \
-            "jupyterlite==0.8.1" \
-            "jupyterlite-pyodide-kernel" \
-            jupyter-iframe-commands \
-            jupyterlab-widgets ipywidgets \
-            jupyter-server
+          pip install "pylabrobot==0.2.2" pillow
+          pip install -r jupyterlite/requirements-build.txt
 
       - name: Build the JupyterLite site
         run: python jupyterlite/build.py --deploy deploy
@@ -63,16 +72,15 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
 
       - name: Sanity-check the deploy root
-        # Only assets WE own. The JupyterLite output/ internals (extensions,
-        # static) are upstream's business; "anywidget is available" is asserted
-        # in the browser integration test (drive.cjs), not by peeking at paths.
         # -s (not -f) so a zero-byte artifact fails the build.
         run: |
           test -s deploy/index.html
           test -s deploy/bridge.js
           test -s deploy/deck.html
           test -s deploy/output/lab/index.html
-          test -s deploy/output/files/00_plr_introduction.ipynb
+          test -s deploy/output/files/workshops/00_plr_introduction.ipynb
+          test -s deploy/output/files/data/fragments.csv
+          test -s deploy/output/files/figs/fig_1_plr.jpg
 
       - uses: actions/upload-pages-artifact@v3
         with:

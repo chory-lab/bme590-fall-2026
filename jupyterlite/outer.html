@@ -155,14 +155,15 @@
   })();
 </script>
 <script>
-  // ?nb=<file>.ipynb overrides which notebook JupyterLite opens (driver support).
-  // Bare names are resolved inside workshops/, which is where the notebooks live.
+  // ?nb=<path>.ipynb overrides which notebook JupyterLite opens (driver
+  // support). A full path from the drive root -- "workshops/00_x.ipynb", not
+  // "00_x.ipynb". An earlier version helpfully prefixed bare names with
+  // "workshops/", which silently opened an empty untitled notebook for anything
+  // living elsewhere (deck.ipynb at the root), and a driver run against an
+  // empty notebook looks exactly like a run whose cells all did nothing.
   const q = new URLSearchParams(location.search);
   const nb = q.get("nb");
-  if (nb) {
-    const path = nb.includes("/") ? nb : "workshops/" + nb;
-    document.getElementById("lite").src = "./output/lab/index.html?path=" + path;
-  }
+  if (nb) document.getElementById("lite").src = "./output/lab/index.html?path=" + nb;
 </script>
 <script>
   // The splitter. Width is persisted so a student's layout survives a reload.
