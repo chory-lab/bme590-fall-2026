@@ -195,26 +195,70 @@ async function main() {
     // index 0) is selected and run, waiting briefly between runs.
     console.log("running cells individually (skipping CI markers/stubs)...");
     const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should throw an error|should throw our better error/;
+    // Enumerate from the model, not the DOM. `.jp-CodeCell` only matches cells
+    // JupyterLab has actually rendered -- the notebook is windowed -- so a DOM
+    // walk silently misses everything below the fold and reports a short
+    // notebook as complete. The model also gives the cell's true index among
+    // all cells, which is what running a specific cell requires.
     const nbCells = await evalJS(`(() => {
-      const doc = document.querySelector('#lite').contentDocument;
-      const cells = doc.querySelectorAll('.jp-CodeCell');
+      const w = document.querySelector('#lite').contentWindow;
+      const app = w.jupyterapp || w.jupyterlab;
+      if (!app) return [{ err: "no app global (build with --probe)" }];
+      let panel = null;
+      for (const x of app.shell.widgets("main")) {
+        if (x.content && x.content.model && x.content.model.cells) { panel = x; break; }
+      }
+      if (!panel) return [{ err: "no notebook widget" }];
+      const model = panel.content.model;
       const info = [];
-      cells.forEach((c, i) => {
-        const cm = c.querySelector('.cm-content');
-        const text = cm ? (cm.cmView?.view?.state.doc.toString() || cm.innerText || "") : "";
-        info.push({ i, skip: ${SKIP_RE}.test(text) });
-      });
+      let code = 0;
+      for (let i = 0; i < model.cells.length; i++) {
+        const cell = model.cells.get(i);
+        if (cell.type !== "code") continue;
+        const text = cell.sharedModel.getSource();
+        info.push({ i: code++, domIndex: i, skip: ${SKIP_RE}.test(text) });
+      }
       return info;
     })()`).catch((e) => [{ err: e.message }]);
+    if (nbCells[0] && nbCells[0].err) throw new Error("cell enumeration failed: " + nbCells[0].err);
     const codeCells = nbCells.filter((x) => !x.skip || x.i === 0);
     console.log(`  ${codeCells.length} runnable cells (${nbCells.length - codeCells.length} skipped)`);
 
+    // Select each cell by index through the notebook widget, then run exactly
+    // that cell.
+    //
+    // This used to be `notebook:select-cell` with a positional index followed
+    // by `notebook:run-cell-and-select-next`. There is no such signature for
+    // select-cell, so it threw and the `.catch(() => {})` swallowed it -- every
+    // iteration simply ran the active cell and advanced by one. The loop runs
+    // once per *code* cell, but "select next" steps through *all* cells, and
+    // the workshops alternate markdown and code. So it walked half the notebook
+    // and stopped: for a 10-cell fixture with code at 1,3,5,7,9 it executed
+    // exactly two code cells, then reported "cell 0 OK" through "cell 4 OK" for
+    // all five, because its OK meant "the command dispatched", not "the cell
+    // ran".
+    //
+    // Everything downstream then looked broken -- no visualizer, no bridge
+    // messages, an empty deck -- when the cell that builds the visualizer had
+    // simply never executed.
+    const runOne = (i) => evalJS(`(async () => {
+      const w = document.querySelector('#lite').contentWindow;
+      const app = w.jupyterapp || w.jupyterlab;
+      if (!app) return "ERR no app global (build with --probe)";
+      let panel = null;
+      for (const x of app.shell.widgets("main")) {
+        if (x.content && x.content.model && x.content.model.cells) { panel = x; break; }
+      }
+      if (!panel) return "ERR no notebook widget";
+      panel.content.activeCellIndex = ${i};
+      return app.commands.execute("notebook:run-cell").then(() => "OK").catch((e) => "ERR " + e.message);
+    })()`);
+
     for (const cell of codeCells) {
       try {
-        await evalJS(`window.__liteBridge.execute('notebook:select-cell', ${cell.i}).catch(() => {})`);
-        const r = await evalJS(`window.__liteBridge.execute('notebook:run-cell-and-select-next').then(() => 'OK').catch((e) => "ERR " + e.message)`);
+        const r = await runOne(cell.domIndex);
         await sleep(cell.i === 0 ? 15000 : 2500);  // bootstrap (piplite.install) is slow
-        console.log(`  cell ${cell.i} ${r}`);
+        console.log(`  cell ${cell.i} (nb index ${cell.domIndex}) ${r}`);
       } catch (e) {
         console.log(`  cell ${cell.i} driver-error: ${e.message}`);
       }
@@ -368,21 +412,40 @@ async function main() {
     console.log("\n=== bridge messages received by the outer page ===");
     console.log(JSON.stringify(messages, null, 2));
 
+    // Gates read the notebook MODEL, never the DOM.
+    //
+    // They used to grep `cellOutputs` (windowed -- misses every cell below the
+    // fold) and console markers left over from `counter.ipynb`, a probe
+    // notebook that no longer ships. The result was a suite that reported
+    // gate1_python FAIL on a run where Python demonstrably executed and the
+    // deck painted 4556 shapes. A gate that fails while the thing it measures
+    // works is worse than no gate: it trains you to ignore it.
+    const model = cellModel.cells || [];
+    const ran = model.filter((c) => c.exec !== null);
+    const errored = model.filter((c) => c.ename);
+    const stdout = model.map((c) => c.stdout || "").join(" ");
+
     const gates = {
-      gate1_python: consoleLines.some((l) => l.includes("PYTHON_EXECUTES")) ||
-        cellOutputs.some((l) => l.includes("PYTHON_EXECUTES")) ||
-        cellOutputs.some((l) => l.includes("PLR")),
-      gate2_anywidget: consoleLines.some((l) => l.includes("ANYWIDGET")) ||
-        cellOutputs.some((l) => l.includes("ANYWIDGET")),
-      gate3_render: consoleLines.some((l) => l.includes("DECK_PROBE_RENDERED")) ||
-        cellOutputs.some((l) => l.includes("VIS_MOUNTED")),
-      gate4_msg: consoleLines.some((l) => l.includes("PROBE_MESSAGE")) ||
-        cellOutputs.some((l) => l.includes("PROTOCOL_DONE")),
-      gate5_parent: messages.length > 0,
-      gate6_deck: deckState && (deckState.hasStage || (deckState.shapes || 0) > 0),
+      // Every code cell reached the kernel and came back with a count.
+      gate1_cells_executed: model.length > 0 && ran.length === model.length,
+      // ...and none of them raised. Workshops with intentional-error cells are
+      // filtered by SKIP_RE before they are ever run.
+      gate2_no_errors: errored.length === 0,
+      // The visualizer mounted (its transport displayed the bridge widget).
+      gate3_vis_mounted: /VIS_MOUNTED|JupyterLiteBridgeWidget/.test(stdout),
+      // The protocol produced events, and they crossed into the parent page.
+      gate4_parent_messages: messages.length > 0,
+      // The deck actually drew them.
+      gate5_deck_painted: !!deckState && (deckState.shapes || 0) > 1,
     };
     console.log("\n=== gates ===");
     for (const [k, v] of Object.entries(gates)) console.log(`  ${k}: ${v ? "PASS" : "FAIL"}`);
+    if (!gates.gate1_cells_executed) {
+      const missed = model.filter((c) => c.exec === null).map((c) => c.i);
+      console.log(`  (cells with no execution count: ${JSON.stringify(missed)})`);
+    }
+    for (const c of errored) console.log(`  (cell ${c.i} raised ${c.ename}: ${c.evalue})`);
+    if (Object.values(gates).some((v) => !v)) process.exitCode = 1;
     if (messages.length === 0) {
       console.log("\nNO BRIDGE MESSAGES.");
       process.exitCode = 1;
