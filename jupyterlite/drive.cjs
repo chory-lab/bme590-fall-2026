@@ -18,7 +18,11 @@ const CHROME = process.env.PLR_CHROME || [
   "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
 ].find((p) => fs.existsSync(p)) || "google-chrome";
-const PORT = 9333;
+// A fixed debugger port makes two runs collide: the second attaches to the
+// first run's Chrome, drives a page it did not navigate, and hangs in ways that
+// look like product bugs. Pick a free-ish port per run, and let PLR_CDP_PORT
+// pin it when you want to attach by hand.
+const PORT = Number(process.env.PLR_CDP_PORT || (9300 + Math.floor(Math.random() * 600)));
 const NOTEBOOK = process.env.PLR_NB || "workshops/00_plr_introduction.ipynb";
 const BASE = process.env.PLR_URL || "http://127.0.0.1:8812/outer.html";
 const URL = `${BASE}?nb=${NOTEBOOK}`;
@@ -287,7 +291,15 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
       return info;
     })()`).catch((e) => [{ err: e.message }]);
     if (nbCells[0] && nbCells[0].err) throw new Error("cell enumeration failed: " + nbCells[0].err);
-    const codeCells = nbCells.filter((x) => !x.skip || x.i === 0);
+    // Respect SKIP_RE for every cell, including the first.
+    //
+    // This used to read `!x.skip || x.i === 0`, exempting the first code cell
+    // because it was the bootstrap and always had to run. The bootstrap now
+    // lives in the labextension, so that exemption force-ran whatever happened
+    // to come first -- in workshop 01, a cell that deliberately raises to show
+    // what LiquidHandler() does with no arguments. The suite then reported a
+    // teaching cell as a product failure.
+    const codeCells = nbCells.filter((x) => !x.skip);
     console.log(`  ${codeCells.length} runnable cells (${nbCells.length - codeCells.length} skipped)`);
 
     // Select each cell by index through the notebook widget, then run exactly
@@ -599,6 +611,10 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
     }
   } finally {
     try { ws && ws.close(); } catch {}
+    // Kill the browser we spawned. An orphaned headless Chrome holds its
+    // debugger port and its profile directory, and the next run inherits the
+    // mess.
+    try { chrome.kill(); } catch {}
     // Kill the whole tree of THIS headless Chrome only. Never touch the user's
     // real browser: the headless instance is identifiable by its temp profile.
     try {
