@@ -158,13 +158,15 @@ def is_stub(src):
 def neutralize(src):
     """Make interactive cells runnable headless: don't start the visualizer
     websocket server (the deck/lh are still built and returned), and drop the
-    demo sleeps so execution stays fast."""
+    demo sleeps so execution stays fast. The workshops' sleeps are now
+    `await asyncio.sleep(N)` (browser-safe), so both spellings are zeroed."""
     import re
 
     src = re.sub(r"vis\s*=\s*Visualizer\([^)]*\)", "vis = None", src)
     src = src.replace("await vis.setup()", "pass")
     src = src.replace("await vis.stop()", "pass")
     src = re.sub(r"time\.sleep\(\s*\d+(\.\d+)?\s*\)", "time.sleep(0)", src)
+    src = re.sub(r"await asyncio\.sleep\(\s*\d+(\.\d+)?\s*\)", "await asyncio.sleep(0)", src)
     return src
 
 

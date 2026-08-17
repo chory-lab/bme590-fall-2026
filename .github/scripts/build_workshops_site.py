@@ -53,6 +53,7 @@ def neutralize(src):
     src = src.replace("await vis.setup()", "pass")
     src = src.replace("await vis.stop()", "pass")
     src = re.sub(r"time\.sleep\(\s*\d+(\.\d+)?\s*\)", "time.sleep(0)", src)
+    src = re.sub(r"await asyncio\.sleep\(\s*\d+(\.\d+)?\s*\)", "await asyncio.sleep(0)", src)
     return src
 
 

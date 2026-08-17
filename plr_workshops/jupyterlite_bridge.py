@@ -1,11 +1,9 @@
 """A VisualizerTransport for the JupyterLite-hosted demo.
 
-Unlike :class:`~plr_workshops.widget.AnyWidgetTransport` -- which hosts the deck in
-an iframe *inside the widget output* (the notebook-column model) -- this transport
-renders nothing of its own. The deck iframe lives on the **parent page**, beside the
-JupyterLite iframe; this widget is only a wire.
+The deck iframe lives on the **parent page**, beside the JupyterLite iframe; the
+widget is only a wire.
 
-Event flow, one hop further than the local widget::
+Event flow::
 
     kernel (Pyodide worker) --comm--> anywidget JS (inside JupyterLite iframe)
         --window.parent.postMessage--> outer page --postMessage--> deck iframe
@@ -14,6 +12,10 @@ The deck iframe is the same self-contained ``frontend.build_page()`` document as
 everywhere else. Its socket shim posts ``__plrReady`` to *its* parent -- which is the
 outer page, not the widget -- so the outer page relays readiness back into the
 JupyterLite iframe, and this widget forwards it to Python as the ready handshake.
+
+Also hosts :func:`patch_visualizer`, which lets the workshop notebooks run
+*unmodified* in the browser by swapping the stock ``Visualizer`` name for a
+bridge-backed :class:`~plr_workshops.inline.InlineVisualizer`.
 """
 
 from typing import List, Optional
@@ -21,6 +23,9 @@ from typing import List, Optional
 import anywidget
 import traitlets
 
+from pylabrobot.resources import Resource
+
+from .inline import InlineVisualizer
 from .transport import VisualizerTransport
 
 _ESM = """
@@ -92,3 +97,33 @@ class JupyterLiteBridgeTransport(VisualizerTransport):
   async def stop(self) -> None:
     self._log.clear()
     self._ready = False
+
+
+class BrowserVisualizer(InlineVisualizer):
+  """The workshop ``Visualizer`` under JupyterLite: bridge-backed, no edits.
+
+  The workshops construct ``vis = Visualizer(resource=lh)`` and the name is
+  imported from ``pylabrobot.visualizer.visualizer``. :func:`patch_visualizer`
+  swaps that name to this class so the *same notebook* runs unmodified in a real
+  kernel (stock ``Visualizer``) or in the browser (this, eventing to the deck
+  iframe via :class:`JupyterLiteBridgeTransport`).
+  """
+
+  def __init__(self, resource: Resource, **kwargs):
+    kwargs.pop("transport", None)  # the bridge is always the transport here
+    super().__init__(resource=resource, transport=JupyterLiteBridgeTransport(name="Deck"), **kwargs)
+
+
+def patch_visualizer() -> None:
+  """Make ``pylabrobot.visualizer.visualizer.Visualizer`` resolve to
+  :class:`BrowserVisualizer` in this interpreter.
+
+  Call this in the notebook's bootstrap cell *before* any workshop cell that
+  imports ``Visualizer``. ``InlineVisualizer`` subclasses ``Visualizer``, so
+  isinstance checks and pylabrobot's internals keep working.
+  """
+  import pylabrobot.visualizer.visualizer as _visualizer_module
+
+  _visualizer_module.Visualizer = BrowserVisualizer
+  print("visualizer patched for the browser bridge")
+
