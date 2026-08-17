@@ -10,7 +10,8 @@ const path = require("path");
 
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const PORT = 9333;
-const URL = "http://127.0.0.1:8812/index.html";
+const NOTEBOOK = process.env.PLR_NB || "00_plr_introduction.ipynb";
+const URL = `http://127.0.0.1:8812/outer.html?nb=${NOTEBOOK}`;
 
 let ws = null;
 let msgId = 0;
@@ -183,20 +184,73 @@ async function main() {
     }
     console.log("  sample commands:", JSON.stringify(cmds));
 
-    // Wait for the kernel to boot (Pyodide from CDN is the slow part), then run
-    // the whole notebook through the command bridge -- no keyboard simulation.
-    console.log("waiting for Pyodide/kernel boot (~30s)...");
+    // Wait for the kernel to boot (Pyodide from CDN is the slow part).
+    console.log("waiting for Pyodide/kernel boot (~25s)...");
     await sleep(25000);
 
-    console.log("running notebook:run-all-cells via the command bridge...");
-    const run = await evalJS(`window.__liteBridge.execute('notebook:run-all-cells').then(() => 'OK')`)
-      .catch((e) => "ERR " + e.message);
-    console.log("  run-all-cells:", run);
+    // Run cells one at a time, mirroring a student session and tolerating the
+    // workshops' intentional-error / exercise-stub cells. Cells matching the CI
+    // skip markers are skipped; every other code cell (plus the bootstrap at
+    // index 0) is selected and run, waiting briefly between runs.
+    console.log("running cells individually (skipping CI markers/stubs)...");
+    const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should throw an error|should throw our better error/;
+    const nbCells = await evalJS(`(() => {
+      const doc = document.querySelector('#lite').contentDocument;
+      const cells = doc.querySelectorAll('.jp-CodeCell');
+      const info = [];
+      cells.forEach((c, i) => {
+        const cm = c.querySelector('.cm-content');
+        const text = cm ? (cm.cmView?.view?.state.doc.toString() || cm.innerText || "") : "";
+        info.push({ i, skip: ${SKIP_RE}.test(text) });
+      });
+      return info;
+    })()`).catch((e) => [{ err: e.message }]);
+    const codeCells = nbCells.filter((x) => !x.skip || x.i === 0);
+    console.log(`  ${codeCells.length} runnable cells (${nbCells.length - codeCells.length} skipped)`);
 
-    // Wait for execution + deck rendering. The pip-install cell is the slow part.
-    console.log("waiting for execution to finish...");
-    await sleep(45000);
+    for (const cell of codeCells) {
+      try {
+        await evalJS(`window.__liteBridge.execute('notebook:select-cell', ${cell.i}).catch(() => {})`);
+        const r = await evalJS(`window.__liteBridge.execute('notebook:run-cell-and-select-next').then(() => 'OK').catch((e) => "ERR " + e.message)`);
+        await sleep(cell.i === 0 ? 15000 : 2500);  // bootstrap (piplite.install) is slow
+        console.log(`  cell ${cell.i} ${r}`);
+      } catch (e) {
+        console.log(`  cell ${cell.i} driver-error: ${e.message}`);
+      }
+    }
 
+    // Probe tab completion: JupyterLab's completer is a core plugin; confirm the
+    // kernel-backed popup appears.
+    await sleep(2000);
+    const completionProbe = await evalJS(`(async () => {
+      const doc = document.querySelector('#lite').contentDocument;
+      const all = await window.__liteBridge.listCommands();
+      const comp = (all || []).filter((c) => /complet|completer/i.test(c));
+      const cell = doc.querySelectorAll('.jp-CodeCell')[0];
+      if (!cell) return { compCmds: comp.slice(0, 4), err: "no code cell" };
+      const cm = cell.querySelector('.cm-content');
+      if (!cm) return { compCmds: comp.slice(0, 4), err: "no cm content" };
+      const view = cm.cmView?.view || null;
+      if (!view) return { compCmds: comp.slice(0, 4), err: "no cm view" };
+      view.dispatch({ changes: { from: 0, to: 0, insert: "from pylabrobot import " } });
+      view.focus();
+      view.dispatch({ selection: { anchor: view.state.doc.length } });
+      const target = comp.find((c) => /invoke-notebook/.test(c)) || comp.find((c) => /invoke/i.test(c));
+      const res = target ? await window.__liteBridge.execute(target).then(() => 'OK').catch((e) => "ERR " + e.message)
+                         : "no completer command";
+      await new Promise((r) => setTimeout(r, 1200));
+      const popup = doc.querySelector('.jp-Completer, .cm-tooltip-autocomplete');
+      return {
+        compCmds: comp.slice(0, 8),
+        used: target || null,
+        res,
+        popupVisible: !!popup,
+        popupText: popup ? (popup.textContent || "").replace(/\\s+/g, " ").slice(0, 160) : "",
+      };
+    })()`).catch((e) => ({ err: e.message }));
+    console.log("  completion probe:", JSON.stringify(completionProbe));
+
+    await sleep(5000);
     messages = (await evalJS(`window.__spikeMessages`)) || [];
 
     // Python `print()` goes to cell outputs, not the browser console -- read the

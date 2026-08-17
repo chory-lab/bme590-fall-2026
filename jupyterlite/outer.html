@@ -25,13 +25,19 @@
 <body>
 <div id="wrap">
   <div id="left">
-    <iframe id="lite" src="./output/lab/index.html?path=deck.ipynb" allow="clipboard-read; clipboard-write"></iframe>
+    <iframe id="lite" src="./output/lab/index.html?path=00_plr_introduction.ipynb" allow="clipboard-read; clipboard-write"></iframe>
   </div>
   <div id="right">
     <h2>deck</h2>
     <iframe id="deck" src="./deck.html"></iframe>
   </div>
 </div>
+<script>
+  // ?nb=<file>.ipynb overrides which notebook JupyterLite opens (driver support).
+  const q = new URLSearchParams(location.search);
+  const nb = q.get("nb");
+  if (nb) document.getElementById("lite").src = "./output/lab/index.html?path=" + nb;
+</script>
 <script src="./bridge.js"></script>
 <script>
   // The relay between the two channels:
