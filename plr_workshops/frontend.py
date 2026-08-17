@@ -224,6 +224,14 @@ _AUTOFIT_SCRIPT = """
 # written out. main.css already restyles .navbar on top of these.
 _BOOTSTRAP_SHIM = """
 <style id="plr-bootstrap-shim">
+  /* Bootstrap's only unconditional contribution to this page was the body font.
+     Dropping bootstrap.min.css (164 KB for 8 classes) therefore handed the
+     navbar back to the browser default -- Times -- so "PyLabRobot Visualizer"
+     and the deck name rendered in serif. Restore the stack bootstrap sets,
+     minus the CSS custom properties nothing else here uses. */
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+            Arial, "Noto Sans", sans-serif; font-size: 1rem; font-weight: 400;
+            line-height: 1.5; color: #212529; }
   .navbar { position: relative; display: flex; flex-wrap: wrap;
             align-items: center; justify-content: space-between; }
   .navbar > .container-fluid { display: flex; flex-wrap: inherit;
@@ -232,8 +240,12 @@ _BOOTSTRAP_SHIM = """
             margin-right: auto; margin-left: auto; }
   .bg-light { background-color: #f8f9fa; }
   .navbar-brand { padding-top: .3125rem; padding-bottom: .3125rem;
-            margin-right: 1rem; font-size: 1.25rem; text-decoration: none;
-            white-space: nowrap; color: rgba(0,0,0,.9); }
+            margin-right: 1rem; font-size: 1rem; font-weight: 600;
+            letter-spacing: -.01em; text-decoration: none;
+            white-space: nowrap; color: #212529; }
+  /* The deck's name, rendered beside the brand ({{ source_filename }}). */
+  #source-filename { font-size: .8125rem; font-weight: 500; letter-spacing: .04em;
+            text-transform: uppercase; color: #5b6472; }
   .btn { display: inline-block; font-weight: 400; line-height: 1.5;
             color: #212529; text-align: center; vertical-align: middle;
             cursor: pointer; user-select: none; background-color: transparent;

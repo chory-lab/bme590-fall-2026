@@ -22,13 +22,21 @@ import nbformat
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 
-# The real workshops, browser-ready. Each is copied into content/ with a
-# bootstrap cell prepended; data/ and figs/ ship alongside so `../data` and
-# `../figs` resolve in the kernel's virtual filesystem.
+# The real workshops, browser-ready. Each is copied into content/workshops/
+# with a bootstrap cell prepended.
 WORKSHOPS = [REPO / "workshops" / p for p in
              ("00_plr_introduction.ipynb", "01_deck_setup.ipynb",
               "02_liquid_handling.ipynb", "03_moving_labware.ipynb",
               "04_modular_cloning.ipynb", "05_interfacing_with_peripherals.ipynb")]
+
+# The notebooks are written against the repo layout: they reach their assets as
+# `../figs/x.png` and `os.path.join(os.path.dirname(cwd), "data", "x.csv")`.
+# Shipping them into content/workshops/ -- with data/ and figs/ as siblings, as
+# in the repo -- makes both resolve verbatim in the kernel's virtual filesystem.
+# Flattening them to the drive root is what previously forced two workarounds: a
+# 7.8 KB dict literal of inlined CSVs in the bootstrap cell, and figure requests
+# that 404 once before JupyterLab retries them under /files/.
+WORKSHOP_SUBDIR = "workshops"
 
 _BOOTSTRAP = """\
 # Browser bootstrap: install the package and swap the stock Visualizer for the
@@ -37,22 +45,17 @@ import piplite
 await piplite.install("bme590-workshops==0.1.0")
 from plr_workshops.jupyterlite_bridge import patch_visualizer
 patch_visualizer()
-print("BOOTSTRAP_OK")
 """
 
-_DATA_BOOTSTRAP = """\
-# Mount ../data (workshop CSVs) into the kernel's virtual filesystem so
-# `os.path.join(os.path.dirname(cwd), "data", ...)` resolves.
-import os, json
-_DATA = %s
-_cwd = os.getcwd()
-for _rel, _text in _DATA.items():
-    _p = os.path.join(_cwd, "..", "data", _rel)
-    os.makedirs(os.path.dirname(_p), exist_ok=True)
-    with open(_p, "w", encoding="utf-8") as _fh:
-        _fh.write(_text)
-print("DATA_OK")
-"""
+# The Pyodide kernel, as JupyterLite registers it. The repo notebooks carry the
+# desktop kernelspec ("lab-automation"), which the browser cannot match -- so
+# JupyterLab opens a modal asking the student to pick a kernel before they can
+# run anything.
+_BROWSER_KERNELSPEC = {
+  "display_name": "Python (Pyodide)",
+  "language": "python",
+  "name": "python",
+}
 
 
 def python():
@@ -67,23 +70,20 @@ def python():
 
 
 def _workshops() -> None:
-    """Copy the real workshops into content/ with browser bootstraps prepended.
+    """Copy the real workshops into content/workshops/ with bootstraps prepended.
 
     ``content/`` is the config's ``content_files`` target (relative to the
     config's directory), which jupyterlite copies into the output. The build
-    env's ``--contents`` points at the same directory.
+    env's ``--contents`` points at the same directory. The tree mirrors the
+    repo: ``workshops/`` beside ``data/`` and ``figs/``.
     """
     content = HERE / "content"
-    content.mkdir(parents=True, exist_ok=True)
-
-    data_files = {
-        p.name: p.read_text(encoding="utf-8")
-        for p in (REPO / "data").glob("*.csv")
-    }
-    data_bootstrap = (
-        _DATA_BOOTSTRAP % repr(data_files)
-        if data_files else ""
-    )
+    # A stale content/ would keep serving notebooks at the old drive-root paths
+    # alongside the new ones, so the file browser shows each workshop twice.
+    if content.exists():
+        shutil.rmtree(content)
+    workshops = content / WORKSHOP_SUBDIR
+    workshops.mkdir(parents=True, exist_ok=True)
 
     for src in WORKSHOPS:
         if not src.is_file():
@@ -91,17 +91,39 @@ def _workshops() -> None:
             continue
         nb = nbformat.read(src, as_version=4)
         bootstrap = nbformat.v4.new_code_cell(_BOOTSTRAP)
-        if data_files:
-            bootstrap.source += "\n" + data_bootstrap
+        # Hidden by default: this is plumbing, not coursework. Students see the
+        # workshop title first; the cell still runs, and the disclosure arrow
+        # opens it for anyone who wants to read it.
+        bootstrap.metadata["jupyter"] = {"source_hidden": True}
+        bootstrap.metadata["tags"] = ["browser-bootstrap"]
         # The workshop's first cell is a markdown title; insert before it so the
         # bootstrap runs first.
         nb.cells.insert(0, bootstrap)
-        nbformat.write(nb, content / src.name)
-        print(f"  workshop -> content/{src.name} ({len(nb.cells)} cells)")
-    # figs referenced by markdown; ship so relative refs resolve.
-    if (REPO / "figs").is_dir():
-        shutil.copytree(REPO / "figs", content / "figs", dirs_exist_ok=True)
-        print(f"  figs -> content/figs")
+        _strip_outputs(nb)
+        nb.metadata["kernelspec"] = dict(_BROWSER_KERNELSPEC)
+        nbformat.write(nb, workshops / src.name)
+        print(f"  workshop -> content/{WORKSHOP_SUBDIR}/{src.name} ({len(nb.cells)} cells)")
+
+    # Siblings of workshops/, exactly as in the repo, so `../figs/x.png` and
+    # `os.path.join(os.path.dirname(cwd), "data", "x.csv")` resolve unmodified.
+    for name in ("figs", "data"):
+        if (REPO / name).is_dir():
+            shutil.copytree(REPO / name, content / name, dirs_exist_ok=True)
+            print(f"  {name} -> content/{name}")
+
+
+def _strip_outputs(nb) -> None:
+    """Clear saved outputs and execution counts.
+
+    Shipping outputs makes a *failed* run look successful: JupyterLite restores
+    the notebook from IndexedDB on load, so stale `BOOTSTRAP_OK` text appears
+    under cells that never executed -- which is exactly how a dead kernel went
+    unnoticed. An empty notebook cannot lie about what it has run.
+    """
+    for cell in nb.cells:
+        if cell.get("cell_type") == "code":
+            cell["outputs"] = []
+            cell["execution_count"] = None
 
 
 def main():

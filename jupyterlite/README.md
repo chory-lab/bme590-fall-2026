@@ -28,10 +28,16 @@ Set up the venv once:
 
 ```
 py -3.13 -m venv C:\plrlite\venv
-C:\plrlite\venv\Scripts\python.exe -m pip install \
-  "jupyterlite-core==0.8.1" "jupyterlite-pyodide-kernel" \
-  anywidget sidecar jupyterlab-widgets ipywidgets jupyter-server
+C:\plrlite\venv\Scripts\python.exe -m pip install -r jupyterlite\requirements-build.txt
 ```
+
+**Install from `requirements-build.txt`, never by naming packages ad hoc.** The
+`jupyterlite-pyodide-kernel` pin is load-bearing: unpinned, pip resolves 0.8.3,
+which is built against JupyterLab 4.6.1 while `jupyterlite-core==0.8.1` ships
+4.6.0. The federation runtime then declines to load the kernel extension — with
+nothing but a console *warning* — and the built site registers **zero kernels**.
+It looks completely normal until you try to run a cell. The file has the full
+story.
 
 Build + serve + drive:
 
