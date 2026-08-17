@@ -42,19 +42,26 @@ jobs:
           python-version: "3.11"
 
       - name: Install the build environment
-        # pylabrobot (deck.html), the JupyterLite toolchain, and Pillow (the
-        # navbar logo shrink) all run host-side; numpy/pandas/pillow for the
+        # pylabrobot (deck.html), the JupyterLite CLI + toolchain, and Pillow
+        # (navbar logo shrink) all run host-side; numpy/pandas/pillow for the
         # *kernel* ship inside Pyodide's own lockfile.
         run: |
           pip install --upgrade pip
           pip install \
             "pylabrobot==0.2.2" \
             pillow \
-            "jupyterlite-core==0.8.1" \
+            "jupyterlite==0.8.1" \
             "jupyterlite-pyodide-kernel" \
             jupyter-iframe-commands \
             jupyterlab-widgets ipywidgets \
             jupyter-server
+
+      - name: Fetch the vendored visualizer assets
+        # _vendored/ (konva.min.js + shrunk logo) is gitignored build output;
+        # the deck page inlines it, so populate it before building.
+        run: python -m plr_workshops.vendor
+        env:
+          PYTHONPATH: ${{ github.workspace }}
 
       - name: Build the JupyterLite site
         run: python jupyterlite/build.py --deploy deploy
