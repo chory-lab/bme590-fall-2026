@@ -23,10 +23,9 @@ site/
 demo/
 
 # Third-party assets fetched by plr_workshops/vendor.py so the demo runs with
-# no network. Both are build output: `python -m plr_workshops.build_demo`
-# recreates them, and the cache makes a rebuild itself offline.
+# no network. The cache is build output; _vendored/ (konva + shrunk logo) is
+# COMMITTED so deck.html builds offline from any checkout.
 .vendor-cache/
-plr_workshops/_vendored/
 
 # pyodide, a devDependency used only by test_demo_pyodide.mjs.
 node_modules/
