@@ -65,6 +65,36 @@ for _name in %(ot_names)r:
 _OT_DEFS = ("opentrons_96_tiprack_1000ul", "opentrons_96_tiprack_300ul")
 _OT_COMMIT = "5b51a98ce736b2bb5aff780bf3fdf91941a038fa"
 
+# The Pyodide runtime, served from our own origin instead of jsdelivr.
+#
+# The bytes are downloaded either way -- browsers partition the HTTP cache by
+# top-level origin, so nobody arrives with a warm copy of someone else's CDN
+# fetch. Hosting it ourselves costs the student nothing (Pyodide loads packages
+# lazily; the site only *offers* them) and buys three things: the class stops
+# depending on jsdelivr being reachable during a lab session, `python -m
+# http.server` works with no network, and CI stops re-downloading the runtime
+# on every fresh profile.
+#
+# The version is not a choice. jupyterlite-pyodide-kernel 0.8.1 targets exactly
+# this build (see its constants.PYODIDE_CDN_URL); a different runtime breaks the
+# kernel. The `core` tarball is the runtime alone -- 6.5 MB against 410 MB for
+# the full distribution, which is mostly packages these workshops never import.
+_PYODIDE_VERSION = "314.0.1"
+_PYODIDE_TARBALL = f"pyodide-core-{_PYODIDE_VERSION}.tar.bz2"
+_PYODIDE_URL = (
+    "https://github.com/pyodide/pyodide/releases/download/"
+    f"{_PYODIDE_VERSION}/{_PYODIDE_TARBALL}"
+)
+
+# Pyodide packages the workshops import, plus what piplite needs to install the
+# kernel wheel. The `core` tarball ships pyodide-lock.json listing 359 packages
+# but none of their wheels, and once the runtime is served locally a missing
+# wheel is a 404 rather than a fall back to the CDN -- so anything reachable
+# from here must be fetched beside the lock. Transitive dependencies are
+# resolved from the lock itself, not listed by hand.
+_PYODIDE_PACKAGES = ("pandas", "numpy", "pillow", "micropip")
+_PYODIDE_CDN = f"https://cdn.jsdelivr.net/pyodide/v{_PYODIDE_VERSION}/full"
+
 # The Pyodide kernel, as JupyterLite registers it. The repo notebooks carry the
 # desktop kernelspec ("lab-automation"), which the browser cannot match -- so
 # JupyterLab opens a modal asking the student to pick a kernel before they can
@@ -299,6 +329,74 @@ def _build_bootstrap_extension() -> Path:
     return built
 
 
+def _pyodide_dist() -> Path:
+    """Return a local Pyodide distribution tarball, downloading it once.
+
+    Cached in .vendor-cache/ like the rest of the vendored assets, so repeat
+    builds and a warm CI cache do no network at all.
+    """
+    import urllib.request
+
+    cache = REPO / ".vendor-cache"
+    cache.mkdir(parents=True, exist_ok=True)
+    tarball = cache / _PYODIDE_TARBALL
+
+    if not tarball.is_file():
+        print(f"  fetching {_PYODIDE_TARBALL} (~6.5 MB)...")
+        tmp = tarball.with_suffix(".part")
+        with urllib.request.urlopen(_PYODIDE_URL) as response:
+            tmp.write_bytes(response.read())
+        tmp.replace(tarball)
+
+    print(f"  pyodide {_PYODIDE_VERSION} -> {tarball.stat().st_size / 1048576:.1f} MB (cached)")
+    return tarball
+
+
+def _seed_pyodide_packages(out_dir: Path) -> None:
+    """Fetch the wheels the workshops need, beside the vendored runtime.
+
+    Walks pyodide-lock.json for the dependency closure of _PYODIDE_PACKAGES, so
+    adding an import to a workshop means adding one name here rather than
+    working out what it drags in.
+    """
+    import json as _json
+    import urllib.request
+
+    dist = out_dir / "static" / "pyodide"
+    lock = dist / "pyodide-lock.json"
+    if not lock.is_file():
+        raise SystemExit(f"no pyodide-lock.json at {lock}; is the runtime vendored?")
+
+    packages = _json.loads(lock.read_text(encoding="utf-8"))["packages"]
+
+    wanted, queue = set(), list(_PYODIDE_PACKAGES)
+    while queue:
+        name = queue.pop()
+        if name in wanted:
+            continue
+        entry = packages.get(name)
+        if entry is None:
+            raise SystemExit(f"{name!r} is not in pyodide-lock.json for {_PYODIDE_VERSION}")
+        wanted.add(name)
+        queue.extend(entry.get("depends", []))
+
+    cache = REPO / ".vendor-cache" / f"pyodide-{_PYODIDE_VERSION}-wheels"
+    cache.mkdir(parents=True, exist_ok=True)
+
+    total = 0
+    for name in sorted(wanted):
+        filename = packages[name]["file_name"]
+        cached = cache / filename
+        if not cached.is_file():
+            with urllib.request.urlopen(f"{_PYODIDE_CDN}/{filename}") as response:
+                cached.write_bytes(response.read())
+        shutil.copyfile(cached, dist / filename)
+        total += cached.stat().st_size
+
+    print(f"  pyodide packages -> {len(wanted)} wheels, {total / 1048576:.1f} MB "
+          f"(closure of {', '.join(_PYODIDE_PACKAGES)})")
+
+
 def _opentrons_defs(dest: Path) -> None:
     """Fetch the Opentrons labware definitions the workshops use, at build time.
 
@@ -439,6 +537,7 @@ def main():
         "--config", str(HERE / "site" / "jupyter_lite_config.json"),
         "--contents", str(HERE / "content"),
         f"--LiteBuildConfig.federated_extensions={bootstrap_ext}",
+        f"--PyodideAddon.pyodide_url={_pyodide_dist()}",
         # No --piplite-wheels: jupyterlite auto-discovers wheels in the lite
         # dir's pypi/ (HERE/pypi). Passing the flag AND having pypi/ makes the
         # post_init and build copy tasks share a target and abort.
@@ -451,6 +550,7 @@ def main():
         raise SystemExit(f"jupyterlite build failed: rc={proc.returncode}")
     print(f"\nbuilt -> {out_dir}")
 
+    _seed_pyodide_packages(out_dir)
     _check_extensions(out_dir)
 
     if _PROBE:

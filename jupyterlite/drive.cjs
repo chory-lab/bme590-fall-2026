@@ -543,6 +543,36 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
     console.log("=== deck iframe state (after foreground frame) ===");
     console.log("  ", JSON.stringify(deckState2));
 
+    // Offline audit: anything fetched from another origin.
+    //
+    // performance.getEntriesByType("resource") inside the page is the reliable
+    // way to see this -- a CDP network listener only sees requests made after it
+    // attaches, so it misses the entire boot, which is exactly when a runtime or
+    // a wheel would be pulled from a CDN.
+    const external = await evalJS(`(() => {
+      const here = location.origin;
+      const seen = new Set();
+      const frames = [window, document.querySelector('#lite').contentWindow];
+      for (const frame of frames) {
+        let entries = [];
+        try { entries = frame.performance.getEntriesByType('resource'); } catch (e) { continue; }
+        for (const entry of entries) {
+          try {
+            const origin = new URL(entry.name).origin;
+            if (origin !== here) seen.add(origin);
+          } catch (e) {}
+        }
+      }
+      return [...seen];
+    })()`).catch((e) => ['audit failed: ' + e.message]);
+
+    console.log('=== offline audit ===');
+    if (external.length === 0) {
+      console.log('   no external origins -- everything served from this site');
+    } else {
+      console.log('   EXTERNAL ORIGINS:', JSON.stringify(external));
+    }
+
     console.log("\n=== console lines from the iframe ===");
     for (const line of consoleLines) console.log("  ", line);
     console.log("\n=== bridge messages received by the outer page ===");
