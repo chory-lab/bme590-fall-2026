@@ -82,6 +82,28 @@ jobs:
           test -s deploy/output/files/data/fragments.csv
           test -s deploy/output/files/figs/fig_1_plr.jpg
 
+      - name: Browser integration test
+        # The check that would have caught the missing anywidget labextension,
+        # and the one the comment above used to claim was already running.
+        # drive.cjs boots the built site in a headless Chrome, runs every cell
+        # of a notebook, and asserts against the notebook model that the cells
+        # executed, that the visualizer mounted, that its events crossed into
+        # the parent page, and that the deck actually drew them. A failing gate
+        # exits non-zero.
+        #
+        # --probe sets exposeAppInBrowser, which the driver needs to read the
+        # model. The artifact published below is built without it.
+        run: |
+          npm install ws
+          python jupyterlite/build.py --probe --deploy deploy-test
+          python -m http.server 8812 --directory deploy-test &
+          sleep 3
+          PLR_URL=http://127.0.0.1:8812/ PLR_NB=deck.ipynb node jupyterlite/drive.cjs
+          PLR_URL=http://127.0.0.1:8812/ PLR_NB=workshops/00_plr_introduction.ipynb \
+            node jupyterlite/drive.cjs
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: deploy

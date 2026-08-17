@@ -48,7 +48,22 @@ import piplite
 await piplite.install("bme590-workshops==0.1.0")
 from plr_workshops.jupyterlite_bridge import patch_visualizer
 patch_visualizer()
+
+# Seed PyLabRobot's Opentrons labware cache. Its loader fetches definitions
+# from raw.githubusercontent.com on first use and caches them at /tmp/<name>.json;
+# in Pyodide that fetch raises "RuntimeError: TLS not supported in this
+# environment". Putting the files where it already looks means it never tries.
+import shutil, os
+for _name in %(ot_names)r:
+    _dst = f"/tmp/{_name}.json"
+    if not os.path.exists(_dst):
+        shutil.copyfile(os.path.join(os.path.dirname(os.getcwd()), "otdefs", f"{_name}.json"), _dst)
 """
+
+# Opentrons labware the workshops use. PyLabRobot pins this commit in
+# resources/opentrons/load.py; keep them in step when upgrading pylabrobot.
+_OT_DEFS = ("opentrons_96_tiprack_1000ul", "opentrons_96_tiprack_300ul")
+_OT_COMMIT = "5b51a98ce736b2bb5aff780bf3fdf91941a038fa"
 
 # The Pyodide kernel, as JupyterLite registers it. The repo notebooks carry the
 # desktop kernelspec ("lab-automation"), which the browser cannot match -- so
@@ -93,7 +108,7 @@ def _workshops() -> None:
             print(f"  (skip missing {src.name})")
             continue
         nb = nbformat.read(src, as_version=4)
-        bootstrap = nbformat.v4.new_code_cell(_BOOTSTRAP)
+        bootstrap = nbformat.v4.new_code_cell(_BOOTSTRAP % {"ot_names": list(_OT_DEFS)})
         # Hidden by default: this is plumbing, not coursework. Students see the
         # workshop title first; the cell still runs, and the disclosure arrow
         # opens it for anyone who wants to read it.
@@ -113,6 +128,8 @@ def _workshops() -> None:
         if (REPO / name).is_dir():
             shutil.copytree(REPO / name, content / name, dirs_exist_ok=True)
             print(f"  {name} -> content/{name}")
+
+    _opentrons_defs(content / "otdefs")
 
     # The synthetic bridge fixture. Small, known-good, and independent of the
     # workshops: when the real notebooks stop painting the deck, running this
@@ -180,6 +197,30 @@ def _expose_app(out_dir: Path) -> None:
     config["jupyter-config-data"]["exposeAppInBrowser"] = True
     path.write_text(_json.dumps(config, indent=2), encoding="utf-8")
     print(f"  probe: exposeAppInBrowser -> {path.name}")
+
+
+def _opentrons_defs(dest: Path) -> None:
+    """Fetch the Opentrons labware definitions the workshops use, at build time.
+
+    Cached under .vendor-cache/ so repeat builds -- and CI with a warm cache --
+    do no network at all, matching how the rest of the vendored assets work.
+    """
+    import urllib.request
+
+    cache = REPO / ".vendor-cache" / "otdefs"
+    cache.mkdir(parents=True, exist_ok=True)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    for name in _OT_DEFS:
+        cached = cache / f"{name}.json"
+        if not cached.is_file():
+            url = ("https://raw.githubusercontent.com/Opentrons/opentrons/"
+                   f"{_OT_COMMIT}/shared-data/labware/definitions/2/{name}/1.json")
+            with urllib.request.urlopen(url) as response:
+                cached.write_bytes(response.read())
+            print(f"  fetched {name}.json")
+        shutil.copyfile(cached, dest / f"{name}.json")
+    print(f"  otdefs -> content/otdefs ({len(_OT_DEFS)} definitions)")
 
 
 def _strip_outputs(nb) -> None:

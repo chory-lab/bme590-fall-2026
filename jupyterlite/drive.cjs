@@ -8,7 +8,16 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
-const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
+// PLR_CHROME overrides; otherwise the first path that exists. Linux entries
+// come first so CI (ubuntu-latest, where `google-chrome` is preinstalled)
+// needs no configuration.
+const CHROME = process.env.PLR_CHROME || [
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/chromium",
+  "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+].find((p) => fs.existsSync(p)) || "google-chrome";
 const PORT = 9333;
 const NOTEBOOK = process.env.PLR_NB || "workshops/00_plr_introduction.ipynb";
 const BASE = process.env.PLR_URL || "http://127.0.0.1:8812/outer.html";
@@ -194,7 +203,10 @@ async function main() {
     // skip markers are skipped; every other code cell (plus the bootstrap at
     // index 0) is selected and run, waiting briefly between runs.
     console.log("running cells individually (skipping CI markers/stubs)...");
-    const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should throw an error|should throw our better error/;
+    // Cells the workshops intend NOT to run: exercise stubs students fill in, and
+// cells that deliberately raise to make a teaching point. `import ... from ...`
+// is a literal exercise placeholder and a SyntaxError if executed.
+const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should throw an error|should throw our better error|import \.\.\. from \.\.\.|# Function N Code:|add any imports needed/;
     // Enumerate from the model, not the DOM. `.jp-CodeCell` only matches cells
     // JupyterLab has actually rendered -- the notebook is windowed -- so a DOM
     // walk silently misses everything below the fold and reports a short
@@ -389,7 +401,8 @@ async function main() {
     // suspended in backgrounded automation, so a screenshot interleaves a real
     // frame. Then re-probe.
     const shot = await send("Page.captureScreenshot", { format: "png" });
-    const shotPath = "C:/plrlite/deck.png";
+    const shotPath = process.env.PLR_SHOT ||
+      path.join(require("os").tmpdir(), "plr-deck.png");
     fs.writeFileSync(shotPath, Buffer.from(shot.data, "base64"));
     console.log("  screenshot ->", shotPath);
     await sleep(1000);
@@ -421,16 +434,22 @@ async function main() {
     // deck painted 4556 shapes. A gate that fails while the thing it measures
     // works is worse than no gate: it trains you to ignore it.
     const model = cellModel.cells || [];
+    const byIndex = new Map(model.map((c) => [c.i, c]));
+    const expected = codeCells.map((c) => c.domIndex);   // what we tried to run
     const ran = model.filter((c) => c.exec !== null);
     const errored = model.filter((c) => c.ename);
     const stdout = model.map((c) => c.stdout || "").join(" ");
 
     const gates = {
-      // Every code cell reached the kernel and came back with a count.
-      gate1_cells_executed: model.length > 0 && ran.length === model.length,
+      // Every cell the driver actually ran came back with an execution count.
+      // Skipped cells (exercise stubs) never run, so they must not count
+      // against this -- an earlier version compared against every code cell and
+      // failed workshop 04 for the five stubs it had correctly declined to run.
+      gate1_cells_executed: expected.length > 0 &&
+        expected.every((i) => byIndex.has(i) && byIndex.get(i).exec !== null),
       // ...and none of them raised. Workshops with intentional-error cells are
       // filtered by SKIP_RE before they are ever run.
-      gate2_no_errors: errored.length === 0,
+      gate2_no_errors: errored.filter((c) => expected.includes(c.i)).length === 0,
       // The visualizer mounted (its transport displayed the bridge widget).
       gate3_vis_mounted: /VIS_MOUNTED|JupyterLiteBridgeWidget/.test(stdout),
       // The protocol produced events, and they crossed into the parent page.
@@ -441,7 +460,7 @@ async function main() {
     console.log("\n=== gates ===");
     for (const [k, v] of Object.entries(gates)) console.log(`  ${k}: ${v ? "PASS" : "FAIL"}`);
     if (!gates.gate1_cells_executed) {
-      const missed = model.filter((c) => c.exec === null).map((c) => c.i);
+      const missed = expected.filter((i) => !byIndex.has(i) || byIndex.get(i).exec === null);
       console.log(`  (cells with no execution count: ${JSON.stringify(missed)})`);
     }
     for (const c of errored) console.log(`  (cell ${c.i} raised ${c.ename}: ${c.evalue})`);
