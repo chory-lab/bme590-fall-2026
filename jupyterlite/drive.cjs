@@ -199,9 +199,9 @@ async function main() {
     }
     console.log("  sample commands:", JSON.stringify(cmds));
 
-    // Wait for the kernel to boot (Pyodide from CDN is the slow part).
-    console.log("waiting for Pyodide/kernel boot (~25s)...");
-    await sleep(25000);
+    // No fixed boot sleep. PLR_BOOTSTRAP_READY below is emitted from inside the
+    // kernel, so it already implies the kernel booted -- sleeping first just
+    // added 25s to every run for a fact the next wait establishes properly.
 
     // Then wait for the runtime bootstrap to finish.
     //
@@ -270,6 +270,12 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
           // one. Workshop 05 defines visualize_deck but only calls it from skipped
           // exercise stubs, so its run legitimately has no deck and the deck gates
           // must not fail it.
+          // No regex: this is inside a template literal, where a lone
+          // backslash-s collapses to a literal s. /^SLEEPs*=/m is a *valid*
+          // regex that simply never matches -- a silent wrong answer rather
+          // than an error.
+          setsSleep: text.split(String.fromCharCode(10))
+            .some((line) => line.trimStart().indexOf("SLEEP =") === 0),
           usesVis: text.split(String.fromCharCode(10)).some((line) => {
             const t = line.trimStart();
             if (line.length - t.length > 3) return false;
@@ -325,6 +331,11 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
     // Now a stuck cell is reported and the run carries on to the diagnostics,
     // which is where the answer lives.
     const CELL_TIMEOUT_MS = Number(process.env.PLR_CELL_TIMEOUT || 90000);
+    // Iteration speed only. A fast run skips the pauses that let the deck
+    // render between events, so it can hide a timing bug the real pacing would
+    // expose -- keep at least one full-timing run before shipping.
+    const FAST = !!process.env.PLR_FAST;
+    if (FAST) console.log("PLR_FAST: workshop pauses will be zeroed");
     let timedOut = 0;
     for (const cell of codeCells) {
       const label = `cell ${cell.i} (nb index ${cell.domIndex})`;
@@ -334,8 +345,40 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
           sleep(CELL_TIMEOUT_MS).then(() => "TIMEOUT")
         ]);
         if (r === "TIMEOUT") timedOut++;
-        await sleep(cell.i === 0 ? 15000 : 2500);  // bootstrap (piplite.install) is slow
+        // `notebook:run-cell` resolves when the cell *completes*, so there is
+        // nothing left to wait for -- only a short settle so the output area
+        // and model are updated before the next read. These used to be 15s and
+        // 2.5s, from when the driver could not tell whether a cell had finished
+        // and padding was the only defence; on a 68-cell workshop that was four
+        // minutes of sleeping against ~30s of work.
+        await sleep(250);
         console.log(`  ${label} ${r}`);
+
+        // PLR_FAST: run the workshop at full speed by setting its own SLEEP
+        // constant to 0, in the kernel, right after the cell that defines it.
+        //
+        // Deliberately not a rewrite of the notebook source: CI should execute
+        // the same bytes students do. The workshops expose SLEEP for students
+        // who have already watched the animation; this just turns the same knob
+        // from outside.
+        if (FAST && cell.setsSleep) {
+          const set = await evalJS(`(async () => {
+            const w = document.querySelector('#lite').contentWindow;
+            const app = w.jupyterapp || w.jupyterlab;
+            let panel = null;
+            for (const x of app.shell.widgets("main")) {
+              if (x.content && x.content.model && x.content.model.cells) { panel = x; break; }
+            }
+            const kernel = panel && panel.sessionContext.session && panel.sessionContext.session.kernel;
+            if (!kernel) return "ERR no kernel";
+            const fut = kernel.requestExecute({
+              code: "SLEEP = 0", silent: true, store_history: false
+            });
+            const reply = await fut.done;
+            return reply.content.status;
+          })()`).catch((e) => "ERR " + e.message);
+          console.log(`  (PLR_FAST: SLEEP = 0 -> ${set})`);
+        }
       } catch (e) {
         console.log(`  ${label} driver-error: ${e.message}`);
       }

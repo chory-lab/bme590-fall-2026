@@ -157,16 +157,27 @@ def is_stub(src):
 
 def neutralize(src):
     """Make interactive cells runnable headless: don't start the visualizer
-    websocket server (the deck/lh are still built and returned), and drop the
-    demo sleeps so execution stays fast. The workshops' sleeps are now
-    `await asyncio.sleep(N)` (browser-safe), so both spellings are zeroed."""
+    websocket server (the deck/lh are still built and returned), and run the
+    demo pauses at zero.
+
+    The pauses are now written `await asyncio.sleep(N * SLEEP)` against a SLEEP
+    constant the workshops define for students, so setting the constant is
+    enough -- no rewriting of sleep call sites. That matters: every regex here
+    makes the notebook under test differ from the one students run, which is
+    worth minimising rather than extending.
+
+    `time.sleep` is gone from the workshops but stays covered in case one
+    returns via a copy-paste from older material.
+    """
     import re
 
     src = re.sub(r"vis\s*=\s*Visualizer\([^)]*\)", "vis = None", src)
     src = src.replace("await vis.setup()", "pass")
     src = src.replace("await vis.stop()", "pass")
     src = re.sub(r"time\.sleep\(\s*\d+(\.\d+)?\s*\)", "time.sleep(0)", src)
-    src = re.sub(r"await asyncio\.sleep\(\s*\d+(\.\d+)?\s*\)", "await asyncio.sleep(0)", src)
+    # Zero the constant wherever the notebook sets it, rather than rewriting the
+    # 32 call sites that use it.
+    src = re.sub(r"^SLEEP\s*=\s*[0-9.]+\s*$", "SLEEP = 0", src, flags=re.M)
     return src
 
 
