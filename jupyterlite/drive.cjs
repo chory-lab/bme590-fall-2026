@@ -11,7 +11,8 @@ const path = require("path");
 const CHROME = "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const PORT = 9333;
 const NOTEBOOK = process.env.PLR_NB || "00_plr_introduction.ipynb";
-const URL = `http://127.0.0.1:8812/outer.html?nb=${NOTEBOOK}`;
+const BASE = process.env.PLR_URL || "http://127.0.0.1:8812/outer.html";
+const URL = `${BASE}?nb=${NOTEBOOK}`;
 
 let ws = null;
 let msgId = 0;
