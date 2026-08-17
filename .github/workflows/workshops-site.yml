@@ -1,8 +1,8 @@
 name: Workshops Site
 
-# Renders the workshop notebooks to HTML and publishes them as the
-# bme590-fall-2026 GitHub Pages site (the class workbooks, separate from the
-# PyLabRobot cookbook site). See .github/scripts/build_workshops_site.py.
+# Builds the JupyterLite workshop site (the browser-runnable class) and
+# publishes it as the bme590-fall-2026 GitHub Pages site. See
+# jupyterlite/build.py and jupyterlite/README.md.
 
 on:
   push:
@@ -10,13 +10,15 @@ on:
     paths:
       - "workshops/**"
       - "data/**"
-      - "environment.yaml"
-      - ".github/scripts/build_workshops_site.py"
-      - ".github/scripts/check_workshops.py"
+      - "plr_workshops/**"
+      - "jupyterlite/**"
+      - "pyproject.toml"
       - ".github/workflows/workshops-site.yml"
   pull_request:
     paths:
       - "workshops/**"
+      - "plr_workshops/**"
+      - "jupyterlite/**"
       - ".github/workflows/workshops-site.yml"
   workflow_dispatch:
 
@@ -35,29 +37,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system libraries
-        # pylabrobot imports backends that bind libusb and hidapi at import
-        # time. The wheels ship the Python bindings, not the C libraries.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libusb-1.0-0 libhidapi-hidraw0 libhidapi-libusb0
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install the workshop environment
+      - name: Install the build environment
+        # pylabrobot (deck.html), the JupyterLite toolchain, and Pillow (the
+        # navbar logo shrink) all run host-side; numpy/pandas/pillow for the
+        # *kernel* ship inside Pyodide's own lockfile.
         run: |
+          pip install --upgrade pip
           pip install \
-            "pylabrobot[visualizer,opentrons] @ git+https://github.com/PyLabRobot/pylabrobot.git@dd79c4c" \
-            jupyter numpy pandas pillow
+            "pylabrobot==0.2.2" \
+            pillow \
+            "jupyterlite-core==0.8.1" \
+            "jupyterlite-pyodide-kernel" \
+            jupyter-iframe-commands \
+            jupyterlab-widgets ipywidgets \
+            jupyter-server
 
-      - name: Render the notebooks
-        run: python .github/scripts/build_workshops_site.py
+      - name: Build the JupyterLite site
+        run: python jupyterlite/build.py --deploy deploy
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      - name: Sanity-check the deploy root
+        run: |
+          test -f deploy/index.html
+          test -f deploy/bridge.js
+          test -f deploy/deck.html
+          test -f deploy/output/lab/index.html
+          test -f deploy/output/files/00_plr_introduction.ipynb
+          test -f deploy/output/extensions/anywidget/package.json
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: deploy
 
   deploy:
     needs: build
