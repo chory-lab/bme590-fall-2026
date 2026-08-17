@@ -30,6 +30,17 @@ jupyterlite==0.8.1
 jupyterlite-core==0.8.1
 jupyterlite-pyodide-kernel==0.8.1
 
+# Supplies `jupyter labextension build`, which build.py runs to compile the
+# plr-workshops:bootstrap extension. Without it the build dies with
+# "Jupyter command `jupyter-labextension` not found" -- easy to miss locally,
+# where it tends to be installed by hand.
+#
+# The version is not free: it must be the JupyterLab that jupyterlite-core
+# 0.8.1 ships, because the extension shares singletons with it. Building
+# against a newer JupyterLab produces an extension that declines to activate,
+# with only a console warning.
+jupyterlab==4.6.0
+
 anywidget==0.11.0
 ipywidgets==8.1.8
 jupyterlab-widgets==3.0.16
