@@ -206,7 +206,7 @@ async function main() {
     // Cells the workshops intend NOT to run: exercise stubs students fill in, and
 // cells that deliberately raise to make a teaching point. `import ... from ...`
 // is a literal exercise placeholder and a SyntaxError if executed.
-const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should throw an error|should throw our better error|import \.\.\. from \.\.\.|# Function N Code:|add any imports needed/;
+const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should throw an error|should throw our better error|import \.\.\. from \.\.\.|# Function N Code:|add any imports needed|# Test code here|=\s*\.\.\.|\(\.\.\.\)/;
     // Enumerate from the model, not the DOM. `.jp-CodeCell` only matches cells
     // JupyterLab has actually rendered -- the notebook is windowed -- so a DOM
     // walk silently misses everything below the fold and reports a short
@@ -228,7 +228,26 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
         const cell = model.cells.get(i);
         if (cell.type !== "code") continue;
         const text = cell.sharedModel.getSource();
-        info.push({ i: code++, domIndex: i, skip: ${SKIP_RE}.test(text) });
+        info.push({
+          i: code++, domIndex: i,
+          skip: ${SKIP_RE}.test(text),
+          // Does this cell actually CREATE a visualizer when run?
+          //
+          // Plain string logic rather than a regex, and no backticks in this
+          // comment: the whole block is injected through a template literal, where
+          // a backslash needs doubling and a backtick ends the string outright.
+          //
+          // A call at top level counts; a def does not, nor anything indented inside
+          // one. Workshop 05 defines visualize_deck but only calls it from skipped
+          // exercise stubs, so its run legitimately has no deck and the deck gates
+          // must not fail it.
+          usesVis: text.split(String.fromCharCode(10)).some((line) => {
+            const t = line.trimStart();
+            if (line.length - t.length > 3) return false;
+            if (t.startsWith("def ") || t.startsWith("async def ")) return false;
+            return t.includes("visualize_deck(") || t.includes("Visualizer(");
+          }),
+        });
       }
       return info;
     })()`).catch((e) => [{ err: e.message }]);
@@ -440,6 +459,16 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
     const errored = model.filter((c) => c.ename);
     const stdout = model.map((c) => c.stdout || "").join(" ");
 
+    // Whether the deck gates apply at all. Workshop 05 defines visualize_deck
+    // but only ever calls it from "YOUR CODE HERE" exercise stubs, which are
+    // skipped -- so an automated run legitimately mounts no visualizer, and
+    // failing it for that is noise. Decide from the cells actually run, not
+    // from the notebook text.
+    const usesVisualizer = codeCells.some((c) => c.usesVis);
+    if (!usesVisualizer) {
+      console.log("  (no visualizer in the cells run -- deck gates not applicable)");
+    }
+
     const gates = {
       // Every cell the driver actually ran came back with an execution count.
       // Skipped cells (exercise stubs) never run, so they must not count
@@ -451,11 +480,11 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
       // filtered by SKIP_RE before they are ever run.
       gate2_no_errors: errored.filter((c) => expected.includes(c.i)).length === 0,
       // The visualizer mounted (its transport displayed the bridge widget).
-      gate3_vis_mounted: /VIS_MOUNTED|JupyterLiteBridgeWidget/.test(stdout),
+      gate3_vis_mounted: !usesVisualizer || /VIS_MOUNTED|JupyterLiteBridgeWidget/.test(stdout),
       // The protocol produced events, and they crossed into the parent page.
-      gate4_parent_messages: messages.length > 0,
+      gate4_parent_messages: !usesVisualizer || messages.length > 0,
       // The deck actually drew them.
-      gate5_deck_painted: !!deckState && (deckState.shapes || 0) > 1,
+      gate5_deck_painted: !usesVisualizer || (!!deckState && (deckState.shapes || 0) > 1),
     };
     console.log("\n=== gates ===");
     for (const [k, v] of Object.entries(gates)) console.log(`  ${k}: ${v ? "PASS" : "FAIL"}`);
@@ -465,11 +494,16 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
     }
     for (const c of errored) console.log(`  (cell ${c.i} raised ${c.ename}: ${c.evalue})`);
     if (Object.values(gates).some((v) => !v)) process.exitCode = 1;
-    if (messages.length === 0) {
+    if (messages.length > 0) {
+      console.log(`\nSUCCESS: ${messages.length} message(s) crossed from the kernel to the parent page.`);
+    } else if (usesVisualizer) {
       console.log("\nNO BRIDGE MESSAGES.");
       process.exitCode = 1;
     } else {
-      console.log(`\nSUCCESS: ${messages.length} message(s) crossed from the kernel to the parent page.`);
+      // Not every workshop drives the deck. Silence here is the correct result
+      // for one that never builds a visualizer, and failing it would train
+      // people to ignore a red run.
+      console.log("\nNo bridge messages, and none expected: this run built no visualizer.");
     }
   } finally {
     try { ws && ws.close(); } catch {}
