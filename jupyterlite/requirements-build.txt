@@ -21,6 +21,12 @@
 # There is no jupyterlite-core 0.8.2/0.8.3 on PyPI, so the kernel pins back.
 # When upgrading, move BOTH lines together and re-run jupyterlite/drive.cjs,
 # which asserts a kernel exists and a cell actually executes.
+# The metapackage is what provides `python -m jupyterlite`, which build.py
+# invokes. jupyterlite-core alone installs the `jupyter lite` CLI but no
+# runnable `jupyterlite` module, and the failure is easy to misread:
+#   No module named jupyterlite.__main__; 'jupyterlite' is a package and
+#   cannot be directly executed
+jupyterlite==0.8.1
 jupyterlite-core==0.8.1
 jupyterlite-pyodide-kernel==0.8.1
 
