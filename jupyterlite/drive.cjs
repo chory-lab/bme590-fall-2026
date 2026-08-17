@@ -627,6 +627,35 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
       return { mb: +(bytes / 1048576).toFixed(1), count, top: top.slice(0, 8) };
     })()`).catch((e) => ({ err: e.message }));
 
+    // PLR_SECOND_NB: open another notebook in the SAME page session and time
+    // its bootstrap. Each notebook gets its own kernel by default, so this asks
+    // whether a student opening workshop 01 after 00 pays the whole Pyodide
+    // startup again -- the most common journey, and one nobody had measured.
+    if (process.env.PLR_SECOND_NB) {
+      const second = process.env.PLR_SECOND_NB;
+      console.log('opening a second notebook in the same session: ' + second);
+      const before = (await evalJS('(window.__plrBootstrap || []).length')) || 0;
+      const t0 = Date.now();
+      await evalJS(`(async () => {
+        const w = document.querySelector('#lite').contentWindow;
+        const app = w.jupyterapp || w.jupyterlab;
+        return app.commands.execute('docmanager:open', { path: "__SECOND__" })
+          .then(() => 'opened').catch((e) => 'ERR ' + e.message);
+      })()`.replace('__SECOND__', second));
+      const done = await waitFor(async () => {
+        const msgs = (await evalJS('window.__plrBootstrap || []')) || [];
+        const later = msgs.slice(before);
+        return later.find((m) => m.type === 'PLR_BOOTSTRAP_READY' || m.type === 'PLR_BOOTSTRAP_FAILED') || null;
+      }, 180000, 1000, 'second notebook bootstrap').catch(() => null);
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+      if (!done) {
+        console.log('   no second bootstrap within timeout (kernel reused, or stuck)');
+      } else {
+        const w = done.firstExecMs != null ? (done.firstExecMs / 1000).toFixed(1) : 'n/a';
+        console.log('   second notebook ready in ' + elapsed + 's (its kernel warmup ' + w + 's)');
+      }
+    }
+
     console.log('=== first-load weight ===');
     console.log('   ' + JSON.stringify(weight));
 
