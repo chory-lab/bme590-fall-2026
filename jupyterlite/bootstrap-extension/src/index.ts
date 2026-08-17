@@ -30,9 +30,14 @@ import { INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
 
 /** Kernel-side bootstrap. Deliberately thin: the logic lives in the package,
  *  where it is readable, testable and versioned with the wheel. */
-const BOOTSTRAP = `
+/** Split in two so the cold-start cost can be attributed: resolving and
+ *  installing the wheel is a different problem from importing it. */
+const INSTALL = `
 import piplite
 await piplite.install("bme590-workshops==0.1.0")
+`;
+
+const INITIALIZE = `
 from plr_workshops.jupyterlite_bootstrap import initialize
 await initialize()
 `;
@@ -69,25 +74,41 @@ async function bootstrap(panel: NotebookPanel): Promise<void> {
   announce('PLR_BOOTSTRAP_STARTED', { kernelId: kernel.id });
 
   try {
-    const future = kernel.requestExecute({
-      code: BOOTSTRAP,
-      silent: true,
-      store_history: false,
-      stop_on_error: true
-    });
-
     // `future.done` resolves even when the code raised, so the reply status is
-    // what actually says whether this worked.
-    const reply = await future.done;
-    if (reply.content.status !== 'ok') {
-      const content = reply.content as any;
-      const error = content.ename
-        ? `${content.ename}: ${content.evalue}`
-        : `execution ${reply.content.status}`;
-      throw new Error(error);
-    }
+    // what actually says whether a step worked.
+    const run = async (code: string, label: string): Promise<number> => {
+      const started = performance.now();
+      const reply = await kernel.requestExecute({
+        code,
+        silent: true,
+        store_history: false,
+        stop_on_error: true
+      }).done;
+      if (reply.content.status !== 'ok') {
+        const content = reply.content as any;
+        const error = content.ename
+          ? `${content.ename}: ${content.evalue}`
+          : `execution ${reply.content.status}`;
+        throw new Error(`${label}: ${error}`);
+      }
+      return Math.round(performance.now() - started);
+    };
 
-    announce('PLR_BOOTSTRAP_READY', { kernelId: kernel.id });
+    // A no-op first, to separate "the kernel is not actually ready yet" from
+    // "installing takes a while". sessionContext.ready resolves before Pyodide
+    // has finished coming up, so the first execute absorbs the remaining
+    // warm-up -- and attributing that to the install is how you end up
+    // optimising the wrong thing.
+    const firstExecMs = await run('pass', 'warmup');
+    const installMs = await run(INSTALL, 'install');
+    const initMs = await run(INITIALIZE, 'initialize');
+
+    announce('PLR_BOOTSTRAP_READY', {
+      kernelId: kernel.id,
+      firstExecMs,
+      installMs,
+      initMs
+    });
   } catch (err) {
     // Let a later open (or a restart) try again rather than latching failure.
     prepared.delete(kernel.id);

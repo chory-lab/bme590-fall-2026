@@ -98,7 +98,12 @@ async function evalJS(expr) {
 }
 
 async function main() {
-  const userData = fs.mkdtempSync(path.join(require("os").tmpdir(), "chrome-lite-"));
+  // A fresh profile per run measures a first-ever visit: empty HTTP cache and,
+  // more importantly, no compiled-wasm cache. Most student sessions are not
+  // that. PLR_PROFILE reuses a directory so a warm visit can be measured too.
+  const userData = process.env.PLR_PROFILE
+    ? (fs.mkdirSync(process.env.PLR_PROFILE, { recursive: true }), process.env.PLR_PROFILE)
+    : fs.mkdtempSync(path.join(require("os").tmpdir(), "chrome-lite-"));
   const chrome = spawn(CHROME, [
     `--remote-debugging-port=${PORT}`,
     `--remote-allow-origins=*`,
@@ -140,6 +145,27 @@ async function main() {
       if (p.entry.level === "error") consoleLines.push("[LOG] " + p.entry.text);
     });
 
+    // Install the listener BEFORE navigating.
+    //
+    // It used to be injected after Page.navigate, which meant it reliably
+    // missed PLR_BOOTSTRAP_STARTED -- so the cold-start breakdown could never
+    // separate "JupyterLab and Pyodide booting" from "the wheel installing".
+    await send("Page.addScriptToEvaluateOnNewDocument", {
+      source: `
+        window.__spikeMessages = [];
+        window.__plrBootstrap = [];
+        window.addEventListener("message", (e) => {
+          const d = e.data;
+          if (!d) return;
+          if (d.source === "bridge-probe") window.__spikeMessages.push(d);
+          if (typeof d.__plrEvent === "string") window.__spikeMessages.push(d);
+          if (typeof d.type === "string" && d.type.indexOf("PLR_BOOTSTRAP") === 0) {
+            window.__plrBootstrap.push(Object.assign({ at: performance.now() }, d));
+          }
+        });
+      `
+    });
+
     console.log("navigating to", URL);
     await send("Page.navigate", { url: URL });
     await sleep(3000);
@@ -173,7 +199,7 @@ async function main() {
           if (typeof d.__plrEvent === "string") window.__spikeMessages.push(d);
           // Runtime setup from the plr-workshops:bootstrap labextension.
           if (typeof d.type === "string" && d.type.indexOf("PLR_BOOTSTRAP") === 0) {
-            window.__plrBootstrap.push(d);
+            window.__plrBootstrap.push(Object.assign({ at: performance.now() }, d));
           }
         });
         return true;
@@ -228,7 +254,22 @@ async function main() {
     } else if (bootstrapState.type === "PLR_BOOTSTRAP_FAILED") {
       console.log("  BOOTSTRAP FAILED:", bootstrapState.error);
     } else {
-      console.log("  runtime ready.");
+      const phases = await evalJS(`(() => {
+        const msgs = window.__plrBootstrap || [];
+        const started = msgs.find((m) => m.type === "PLR_BOOTSTRAP_STARTED");
+        const ready = msgs.find((m) => m.type === "PLR_BOOTSTRAP_READY");
+        const nav = performance.getEntriesByType("navigation")[0];
+        const s = (ms) => +(ms / 1000).toFixed(1);
+        return {
+          boot_to_kernel_s: started ? s(started.at) : null,
+          kernel_warmup_s: ready && ready.firstExecMs != null ? s(ready.firstExecMs) : null,
+          wheel_install_s: ready && ready.installMs != null ? s(ready.installMs) : null,
+          import_init_s: ready && ready.initMs != null ? s(ready.initMs) : null,
+          total_cold_s: ready ? s(ready.at) : null,
+          dom_ready_s: nav ? s(nav.domContentLoadedEventEnd) : null
+        };
+      })()`).catch(() => null);
+      console.log("  runtime ready.", phases ? JSON.stringify(phases) : "");
     }
 
     // Run cells one at a time, mirroring a student session and tolerating the
@@ -565,6 +606,29 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
       }
       return [...seen];
     })()`).catch((e) => ['audit failed: ' + e.message]);
+
+    // What a first-time visitor actually downloads. The hosted site is much
+    // larger than any single session pulls, because Pyodide loads packages
+    // lazily and JupyterLab code-splits.
+    const weight = await evalJS(`(() => {
+      const frames = [window, document.querySelector('#lite').contentWindow];
+      let bytes = 0, count = 0;
+      const top = [];
+      for (const frame of frames) {
+        let entries = [];
+        try { entries = frame.performance.getEntriesByType('resource'); } catch (e) { continue; }
+        for (const entry of entries) {
+          const size = entry.transferSize || entry.encodedBodySize || 0;
+          bytes += size; count++;
+          if (size > 300000) top.push([entry.name.split('/').pop().slice(0, 44), size]);
+        }
+      }
+      top.sort((a, b) => b[1] - a[1]);
+      return { mb: +(bytes / 1048576).toFixed(1), count, top: top.slice(0, 8) };
+    })()`).catch((e) => ({ err: e.message }));
+
+    console.log('=== first-load weight ===');
+    console.log('   ' + JSON.stringify(weight));
 
     console.log('=== offline audit ===');
     if (external.length === 0) {
