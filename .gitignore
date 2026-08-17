@@ -31,13 +31,18 @@ plr_workshops/_vendored/
 # pyodide, a devDependency used only by test_demo_pyodide.mjs.
 node_modules/
 
-# JupyterLite driver + host-bridge deps (dev-only) and the esbuild bundle.
+# JupyterLite driver + host-bridge deps (dev-only).
 jupyterlite/node_modules/
-jupyterlite/bridge.js
 jupyterlite/package-lock.json
+
+# bridge.js is COMMITTED: it is the deterministic esbuild bundle of
+# bridge-entry.mjs (5 lines + two pinned deps) that CI and static hosts serve;
+# regenerating it needs npm, which the build workflow does not run.
+
 
 # JupyterLite spike build output (rebuilt by jupyterlite/build.py).
 jupyterlite/output/
+jupyterlite/deploy/
 jupyterlite/.cache/
 jupyterlite/.jupyterlite.doit.db
 .cache/
