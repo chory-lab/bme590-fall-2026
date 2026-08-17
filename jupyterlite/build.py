@@ -108,28 +108,20 @@ def _workshops() -> None:
             print(f"  (skip missing {src.name})")
             continue
         nb = nbformat.read(src, as_version=4)
-        bootstrap = nbformat.v4.new_code_cell(_BOOTSTRAP % {"ot_names": list(_OT_DEFS)})
-        bootstrap.metadata["tags"] = ["browser-bootstrap"]
-        # Visible, and announced by the note above it.
+        # No bootstrap cell.
         #
-        # This cell was briefly `source_hidden`, on the reasoning that install
-        # plumbing is not coursework. That turned it into a one-line grey strip
-        # above the title -- easy to scroll past, and skipping it makes every
-        # later cell fail with "No module named pylabrobot", which reads like a
-        # broken site rather than a cell you forgot to run. Hiding six lines was
-        # never the point: the clutter worth removing was the 7.8 KB of CSV
-        # literals, and that is gone.
-        note = nbformat.v4.new_markdown_cell(
-            "### ▶ Run this cell first\n"
-            "\n"
-            "It installs PyLabRobot in your browser and points the visualizer at "
-            "the deck panel. It takes a few seconds, and only needs to run once "
-            "per session — but every cell below depends on it.\n"
-        )
-        # The workshop's own first cell is a markdown title; insert before it so
-        # the bootstrap runs ahead of any workshop code.
-        nb.cells.insert(0, bootstrap)
-        nb.cells.insert(0, note)
+        # Installing the wheel, patching the Visualizer and seeding the
+        # Opentrons cache are all done by the plr-workshops:bootstrap
+        # labextension, once per kernel id -- so it also survives Restart
+        # Kernel, which a notebook cell never did.
+        #
+        # The cell had no good form. Visible, it was boilerplate above the title
+        # of every workshop. Hidden, it became a one-line strip students scroll
+        # past, and skipping it made every later cell fail with "No module named
+        # pylabrobot", which reads as a broken site. Leaving it in *alongside*
+        # the extension is worse still: two concurrent piplite.install() calls
+        # in one kernel.
+        _strip_desktop_sections(nb, src.name)
         _strip_outputs(nb)
         nb.metadata["kernelspec"] = dict(_BROWSER_KERNELSPEC)
         nbformat.write(nb, workshops / src.name)
@@ -171,6 +163,7 @@ REQUIRED_EXTENSIONS = {
     "@jupyter-widgets/jupyterlab-manager":    "ipywidgets rendering",
     "anywidget":                              "the deck bridge widget",
     "jupyter-iframe-commands":                "the host control channel",
+    "plr-workshops-bootstrap":                "per-kernel workshop setup",
 }
 
 
@@ -212,6 +205,49 @@ def _expose_app(out_dir: Path) -> None:
     print(f"  probe: exposeAppInBrowser -> {path.name}")
 
 
+def _build_bootstrap_extension() -> Path:
+    """Build the plr-workshops:bootstrap labextension; return its output folder.
+
+    The extension prepares each Pyodide kernel (installs the wheel, patches the
+    Visualizer, seeds the Opentrons cache) so the workshop notebooks carry no
+    environment-management code at all.
+
+    Built here rather than committed so the JupyterLab versions it shares
+    singletons with cannot drift from the ones the site ships. That drift is
+    not a hypothetical -- an extension built against 4.6.3 against an app
+    serving 4.6.0 fails to activate with nothing but a console warning.
+    """
+    ext = HERE / "bootstrap-extension"
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    if npm is None:
+        raise SystemExit("npm is required to build the bootstrap extension")
+
+    if not (ext / "node_modules").is_dir():
+        subprocess.run([npm, "install"], cwd=ext, check=True)
+
+    # `npm run build` calls `jupyter labextension`, which lives beside the
+    # interpreter running this script -- not necessarily on PATH. Without this
+    # the build fails with "Jupyter command `jupyter-labextension` not found"
+    # even though jupyterlab is installed in the very environment invoking it.
+    import os as _os
+
+    env = dict(_os.environ)
+    scripts = str(Path(sys.executable).parent)
+    env["PATH"] = scripts + _os.pathsep + env.get("PATH", "")
+    subprocess.run([npm, "run", "build"], cwd=ext, check=True, env=env)
+
+    built = ext / "labextension"
+    if not (built / "package.json").is_file():
+        raise SystemExit(f"bootstrap extension build produced nothing at {built}")
+
+    # jupyterlite's federated_extensions accepts a folder directly
+    # (copy_one_folder_extension); it rejects .tgz, so do not pack one.
+    for stale in ext.glob("*.tgz"):
+        stale.unlink()
+    print(f"  bootstrap extension -> {built}")
+    return built
+
+
 def _opentrons_defs(dest: Path) -> None:
     """Fetch the Opentrons labware definitions the workshops use, at build time.
 
@@ -233,7 +269,52 @@ def _opentrons_defs(dest: Path) -> None:
                 cached.write_bytes(response.read())
             print(f"  fetched {name}.json")
         shutil.copyfile(cached, dest / f"{name}.json")
-    print(f"  otdefs -> content/otdefs ({len(_OT_DEFS)} definitions)")
+    print(f"  otdefs -> {dest.relative_to(dest.parent.parent)} ({len(_OT_DEFS)} definitions)")
+
+
+# Sections that only make sense on a desktop install, stripped from the browser
+# build. The site *is* the environment here: telling a student to run the
+# notebook locally in VS Code, or to paste an extraPaths hack into settings.json
+# for an interpreter they do not have, is at best noise and at worst sends them
+# off to fix a machine that is working.
+#
+# Matched on marker text and fail-loud: if a heading is reworded, the build stops
+# rather than quietly shipping installation instructions to the browser.
+_DESKTOP_CELLS = (
+    "### Getting Started",                              # PLR installation prose
+    "#### Auto-complete / Pylance Missing Imports Issue",
+    '"python.analysis.extraPaths"',                     # the settings.json cell
+)
+
+# (cell marker, cut everything before this) -- for cells that mix desktop-only
+# advice with content worth keeping.
+_DESKTOP_TRIMS = (("### Usage Note", "### Welcome to PyLabRobot!"),)
+
+
+def _strip_desktop_sections(nb, name: str) -> None:
+    """Drop desktop-install sections from a notebook destined for the browser."""
+    kept, dropped = [], 0
+    for cell in nb.cells:
+        source = "".join(cell["source"]) if isinstance(cell["source"], list) else cell["source"]
+        if any(marker in source for marker in _DESKTOP_CELLS):
+            dropped += 1
+            continue
+        for marker, keep_from in _DESKTOP_TRIMS:
+            if marker in source and keep_from in source:
+                cell["source"] = source[source.index(keep_from):]
+                dropped += 1
+        kept.append(cell)
+    nb.cells = kept
+
+    if name.startswith("00_") and dropped < len(_DESKTOP_CELLS) + len(_DESKTOP_TRIMS):
+        raise SystemExit(
+            f"{name}: expected to strip "
+            f"{len(_DESKTOP_CELLS) + len(_DESKTOP_TRIMS)} desktop sections, stripped "
+            f"{dropped}. The headings in _DESKTOP_CELLS/_DESKTOP_TRIMS have moved; "
+            "update them rather than shipping install instructions to the browser."
+        )
+    if dropped:
+        print(f"    stripped {dropped} desktop-only section(s)")
 
 
 def _strip_outputs(nb) -> None:
@@ -271,10 +352,20 @@ def main():
     # whole repo (stale pip caches keep resurrecting deleted files).
     _build_kernel_wheel()
     contents = _wheel_contents()
+    # Modules plus the Opentrons definitions the bootstrap seeds. Both halves are
+    # asserted: a wheel missing otdefs/ builds and installs perfectly well, then
+    # fails at runtime inside a silent bootstrap. That shipped once already, and
+    # the only reason it surfaced is that the extension reports
+    # PLR_BOOTSTRAP_FAILED out to the page.
     expected = {"plr_workshops/" + m for m in KERNEL_MODULES}
+    expected |= {f"plr_workshops/otdefs/{name}.json" for name in _OT_DEFS}
     if set(contents) != expected:
-        raise SystemExit(f"kernel wheel contents mismatch:\n  {sorted(contents)}")
-    print(f"  kernel wheel: {sorted(contents)}")
+        raise SystemExit(
+            "kernel wheel contents mismatch:\n"
+            f"  missing: {sorted(expected - set(contents))}\n"
+            f"  unexpected: {sorted(set(contents) - expected)}"
+        )
+    print(f"  kernel wheel: {len(contents)} entries incl. {len(_OT_DEFS)} otdefs")
 
     # The deck iframe document is built host-side (pylabrobot installed on this
     # machine), never inside the kernel. Generated, not committed.
@@ -287,11 +378,14 @@ def main():
         shutil.rmtree(out_dir)
     _workshops()
 
+    bootstrap_ext = _build_bootstrap_extension()
+
     cmd = [
         str(python()), "-m", "jupyterlite", "build",
         "--output-dir", str(out_dir),
         "--config", str(HERE / "site" / "jupyter_lite_config.json"),
         "--contents", str(HERE / "content"),
+        f"--LiteBuildConfig.federated_extensions={bootstrap_ext}",
         # No --piplite-wheels: jupyterlite auto-discovers wheels in the lite
         # dir's pypi/ (HERE/pypi). Passing the flag AND having pypi/ makes the
         # post_init and build copy tasks share a target and abort.
@@ -383,7 +477,8 @@ for project in ("anywidget", "traitlets"):
 # hand-rolled demo, the tests) is dead weight in the browser -- and a stale pip
 # build silently re-includes deleted files. Build the kernel wheel from this
 # explicit list so the browser installs only the glue.
-KERNEL_MODULES = ("__init__.py", "transport.py", "inline.py", "jupyterlite_bridge.py")
+KERNEL_MODULES = ("__init__.py", "transport.py", "inline.py", "jupyterlite_bridge.py",
+                  "jupyterlite_bootstrap.py")
 
 # A browser-focused __init__: the repo one eagerly imports frontend +
 # pyodide_transport (host-side), which the kernel does not need.
@@ -422,6 +517,12 @@ def _build_kernel_wheel() -> None:
             if not src.is_file():
                 raise SystemExit(f"kernel module missing: {src}")
             shutil.copy2(src, pkg / name)
+
+        # Opentrons definitions travel inside the wheel, so the bootstrap reads
+        # them through importlib.resources instead of guessing at the notebook's
+        # working directory.
+        otdefs = pkg / "otdefs"
+        _opentrons_defs(otdefs)
         (pkg / "__init__.py").write_text(_KERNEL_INIT, encoding="utf-8")
         (tmp / "pyproject.toml").write_text(
             "[build-system]\n"
@@ -436,7 +537,11 @@ def _build_kernel_wheel() -> None:
             'dependencies = ["anywidget>=0.9", "pylabrobot==0.2.2"]\n'
             "\n"
             "[tool.setuptools]\n"
-            'packages = ["plr_workshops"]\n',
+            'packages = ["plr_workshops"]\n'
+            "include-package-data = true\n"
+            "\n"
+            "[tool.setuptools.package-data]\n"
+            'plr_workshops = ["otdefs/*.json"]\n',
             encoding="utf-8",
         )
         proc = subprocess.run(

@@ -14,12 +14,29 @@
   #left, #right { height: 100%; min-width: 0; }
   #left { flex: 1 1 auto; }
   #right {
-    /* Width is owned by the splitter below; flex-basis is the live value. */
-    flex: 0 0 45%;
+    /* Width is owned by the splitter below; flex-basis is the live value.
+       Even split by default: the deck is the point of the exercise, not a
+       preview, and the notebook still gets a comfortable column at 50%. */
+    flex: 0 0 50%;
     border-left: 1px solid var(--rule);
     display: flex;
     flex-direction: column;
   }
+  /* Runtime status. A thin bar rather than an overlay: the notebook stays
+     readable and scrollable while the kernel is being prepared, and the bar is
+     the only place a silent bootstrap failure can surface. */
+  #status {
+    display: none;
+    position: fixed; left: 0; right: 0; top: 0; z-index: 9998;
+    padding: 6px 14px;
+    font-size: 13px;
+    background: #eef3fb; color: #21324a;
+    border-bottom: 1px solid #c9d8ee;
+  }
+  #status.error { background: #fdecea; color: #7a1c12; border-bottom-color: #f2c2bc; }
+  body.has-status #status { display: block; }
+  body.has-status #wrap { height: calc(100vh - 30px); margin-top: 30px; }
+
   #right h2 {
     margin: 0;
     padding: 9px 14px;
@@ -93,6 +110,7 @@
     <button id="dupe-takeover" type="button">Use this tab instead</button>
   </div>
 </div>
+<div id="status" role="status" aria-live="polite"></div>
 <div id="wrap">
   <div id="left">
     <iframe id="lite" src="./output/lab/index.html?path=workshops/00_plr_introduction.ipynb"
@@ -226,7 +244,7 @@
   });
   // Double-click restores the default split.
   split.addEventListener("dblclick", () => {
-    right.style.flexBasis = "45%";
+    right.style.flexBasis = "50%";
     localStorage.removeItem(KEY);
   });
 </script>
@@ -242,6 +260,18 @@
   // side is ready cannot be lost.
   const lite = document.getElementById("lite");
   const deck = document.getElementById("deck");
+
+  const statusBar = document.getElementById("status");
+  function setStatus(text, isError) {
+    if (!text) {
+      document.body.classList.remove("has-status");
+      return;
+    }
+    statusBar.textContent = text;
+    statusBar.classList.toggle("error", !!isError);
+    document.body.classList.add("has-status");
+    if (isError) console.error("[plr]", text);
+  }
   let deckReady = false;   // DECK_READY: the deck iframe parsed lib.js
   let bridgeReady = false; // BRIDGE_READY: the widget frontend mounted
   const queue = [];
@@ -269,6 +299,15 @@
     }
     // Ack traffic from the deck.
     if (d.__plrAck) console.log("[plr] deck ack:", d.__plrAck);
+
+    // Runtime setup, from the plr-workshops:bootstrap labextension. It runs
+    // `silent`, so nothing lands in the notebook and a failure would otherwise
+    // be invisible until a cell died on an import several minutes later.
+    if (d.type === "PLR_BOOTSTRAP_STARTED") setStatus("Preparing the workshop runtime…");
+    if (d.type === "PLR_BOOTSTRAP_READY") setStatus(null);
+    if (d.type === "PLR_BOOTSTRAP_FAILED") {
+      setStatus("Workshop runtime failed to initialise: " + (d.error || "unknown error"), true);
+    }
   });
 </script>
 </body>

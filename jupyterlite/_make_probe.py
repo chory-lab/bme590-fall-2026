@@ -6,7 +6,7 @@ postMessage relay, the deck -- is only worth instrumenting once that is known.
 
 Three probes, in order:
 
-1. ``SYNC_EXEC_OK``  -- a plain print, immediately after the bootstrap.
+1. ``SYNC_EXEC_OK``  -- a plain print, ahead of the notebook's first code cell.
 2. ``ASYNC_EXEC_OK`` -- an awaited sleep. If 1 prints and 2 does not, the
    top-level-await path is broken and nothing else matters.
 3. ``DECK_EXISTS`` / ``SUMMARY`` -- straight after the deck is built. If these
@@ -79,18 +79,24 @@ def main() -> None:
     # Anchored on source text, not position: the workshop is coursework and
     # will be edited, and a probe silently landing in the wrong place is worse
     # than a build that stops and says so.
-    bootstrap = index_of("patch_visualizer()")
+    #
+    # The probes used to sit after the notebook's bootstrap cell. There is no
+    # bootstrap cell any more -- the labextension prepares the kernel -- so they
+    # go ahead of the first code cell instead, which is also a better test: if
+    # SYNC_EXEC_OK prints, the extension had the kernel ready before the
+    # notebook's own code ran.
     deck_built = index_of("deck = await make_deck_with_carriers_and_contents()")
+    first_code = next(i for i, c in enumerate(cells) if c["cell_type"] == "code")
 
     # Insert from the bottom up so the earlier index stays valid.
     cells.insert(deck_built + 1, _cell(DECK_PROBE))
-    cells.insert(bootstrap + 1, _cell(ASYNC_PROBE))
-    cells.insert(bootstrap + 1, _cell(SYNC_PROBE))
+    cells.insert(first_code, _cell(ASYNC_PROBE))
+    cells.insert(first_code, _cell(SYNC_PROBE))
 
     with open(OUT, "w", encoding="utf-8") as fh:
         json.dump(nb, fh, indent=1)
     print(f"wrote probe_00.ipynb ({len(cells)} cells): "
-          f"sync+async after cell {bootstrap}, deck probe after cell {deck_built + 2}")
+          f"sync+async at cell {first_code}, deck probe after cell {deck_built + 2}")
 
 
 if __name__ == "__main__":

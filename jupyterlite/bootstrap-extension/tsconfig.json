@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "allowSyntheticDefaultImports": true,
+    "composite": true,
+    "declaration": true,
+    "esModuleInterop": true,
+    "incremental": true,
+    "jsx": "react",
+    "lib": ["DOM", "ES2018", "ES2020.Promise"],
+    "module": "esnext",
+    "moduleResolution": "node",
+    "noEmitOnError": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "outDir": "lib",
+    "rootDir": "src",
+    // JupyterLab's own extension template sets this. Without it, tsc type-checks
+    // every transitive .d.ts and fails on @jupyterlab/lsp and lib0 -- neither of
+    // which this extension imports.
+    "skipLibCheck": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "target": "ES2018",
+    "types": []
+  },
+  "include": ["src/*"]
+}

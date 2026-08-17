@@ -161,11 +161,16 @@ async function main() {
     await evalJS(`
       (() => {
         window.__spikeMessages = [];
+        window.__plrBootstrap = [];
         window.addEventListener("message", (e) => {
           const d = e.data;
           if (!d) return;
           if (d.source === "bridge-probe") window.__spikeMessages.push(d);
           if (typeof d.__plrEvent === "string") window.__spikeMessages.push(d);
+          // Runtime setup from the plr-workshops:bootstrap labextension.
+          if (typeof d.type === "string" && d.type.indexOf("PLR_BOOTSTRAP") === 0) {
+            window.__plrBootstrap.push(d);
+          }
         });
         return true;
       })()
@@ -197,6 +202,30 @@ async function main() {
     // Wait for the kernel to boot (Pyodide from CDN is the slow part).
     console.log("waiting for Pyodide/kernel boot (~25s)...");
     await sleep(25000);
+
+    // Then wait for the runtime bootstrap to finish.
+    //
+    // The labextension installs the wheel, patches the Visualizer and seeds the
+    // Opentrons cache on each new kernel. `notebook:run-cell` does not resolve
+    // until the kernel is free, so firing cells during that install looks
+    // exactly like a hang -- the first cell never returns, and without a
+    // timeout the whole suite stops with no output at all. Wait for the
+    // extension to say it is done instead of racing it.
+    console.log("waiting for PLR_BOOTSTRAP_READY...");
+    const bootstrapState = await waitFor(async () => {
+      const seen = (await evalJS(`window.__plrBootstrap || []`)) || [];
+      const done = seen.find((m) => m.type === "PLR_BOOTSTRAP_READY");
+      const failed = seen.find((m) => m.type === "PLR_BOOTSTRAP_FAILED");
+      return done || failed || null;
+    }, 180000, 1000, "runtime bootstrap").catch(() => null);
+
+    if (!bootstrapState) {
+      console.log("  no bootstrap signal (older build without the extension?); continuing");
+    } else if (bootstrapState.type === "PLR_BOOTSTRAP_FAILED") {
+      console.log("  BOOTSTRAP FAILED:", bootstrapState.error);
+    } else {
+      console.log("  runtime ready.");
+    }
 
     // Run cells one at a time, mirroring a student session and tolerating the
     // workshops' intentional-error / exercise-stub cells. Cells matching the CI
@@ -285,14 +314,34 @@ const SKIP_RE = /CI-SKIP|YOUR CODE HERE|you will get an error|this is ok|should 
       return app.commands.execute("notebook:run-cell").then(() => "OK").catch((e) => "ERR " + e.message);
     })()`);
 
+    // A cell that never finishes must not take the suite with it.
+    //
+    // `notebook:run-cell` resolves when the cell *completes*, so anything that
+    // wedges the kernel -- a bootstrap that never returns, an await that never
+    // settles -- leaves this promise pending forever. CDP has no timeout of its
+    // own, so the run simply stopped, printing nothing: no console lines, no
+    // model dump, no gates. Hours of "it stalled again" with zero evidence.
+    //
+    // Now a stuck cell is reported and the run carries on to the diagnostics,
+    // which is where the answer lives.
+    const CELL_TIMEOUT_MS = Number(process.env.PLR_CELL_TIMEOUT || 90000);
+    let timedOut = 0;
     for (const cell of codeCells) {
+      const label = `cell ${cell.i} (nb index ${cell.domIndex})`;
       try {
-        const r = await runOne(cell.domIndex);
+        const r = await Promise.race([
+          runOne(cell.domIndex),
+          sleep(CELL_TIMEOUT_MS).then(() => "TIMEOUT")
+        ]);
+        if (r === "TIMEOUT") timedOut++;
         await sleep(cell.i === 0 ? 15000 : 2500);  // bootstrap (piplite.install) is slow
-        console.log(`  cell ${cell.i} (nb index ${cell.domIndex}) ${r}`);
+        console.log(`  ${label} ${r}`);
       } catch (e) {
-        console.log(`  cell ${cell.i} driver-error: ${e.message}`);
+        console.log(`  ${label} driver-error: ${e.message}`);
       }
+    }
+    if (timedOut) {
+      console.log(`  (${timedOut} cell(s) exceeded ${CELL_TIMEOUT_MS}ms -- see console lines below)`);
     }
 
     // Probe tab completion: JupyterLab's completer is a core plugin; confirm the
