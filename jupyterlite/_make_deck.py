@@ -67,7 +67,7 @@ md(
     "beside JupyterLite. Events hop kernel -> widget -> outer page -> deck."
 )
 code(
-    "from plr_workshops import InlineVisualizer\n"
+    "from plr_workshops.inline import InlineVisualizer\n"
     "from plr_workshops.jupyterlite_bridge import JupyterLiteBridgeTransport\n"
     "\n"
     'vis = InlineVisualizer(resource=lh, transport=JupyterLiteBridgeTransport(name="Deck"))\n'

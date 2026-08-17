@@ -44,7 +44,8 @@ jobs:
       - name: Install the build environment
         # pylabrobot (deck.html), the JupyterLite CLI + toolchain, and Pillow
         # (navbar logo shrink) all run host-side; numpy/pandas/pillow for the
-        # *kernel* ship inside Pyodide's own lockfile.
+        # *kernel* ship inside Pyodide's own lockfile. The vendored visualizer
+        # assets (konva + shrunk logo) are committed, so no network fetch.
         run: |
           pip install --upgrade pip
           pip install \
@@ -56,26 +57,22 @@ jobs:
             jupyterlab-widgets ipywidgets \
             jupyter-server
 
-      - name: Fetch the vendored visualizer assets
-        # _vendored/ (konva.min.js + shrunk logo) is gitignored build output;
-        # the deck page inlines it, so populate it before building.
-        run: python -m plr_workshops.vendor
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-
       - name: Build the JupyterLite site
         run: python jupyterlite/build.py --deploy deploy
         env:
           PYTHONPATH: ${{ github.workspace }}
 
       - name: Sanity-check the deploy root
+        # Only assets WE own. The JupyterLite output/ internals (extensions,
+        # static) are upstream's business; "anywidget is available" is asserted
+        # in the browser integration test (drive.cjs), not by peeking at paths.
+        # -s (not -f) so a zero-byte artifact fails the build.
         run: |
-          test -f deploy/index.html
-          test -f deploy/bridge.js
-          test -f deploy/deck.html
-          test -f deploy/output/lab/index.html
-          test -f deploy/output/files/00_plr_introduction.ipynb
-          test -f deploy/output/extensions/anywidget/package.json
+          test -s deploy/index.html
+          test -s deploy/bridge.js
+          test -s deploy/deck.html
+          test -s deploy/output/lab/index.html
+          test -s deploy/output/files/00_plr_introduction.ipynb
 
       - uses: actions/upload-pages-artifact@v3
         with:

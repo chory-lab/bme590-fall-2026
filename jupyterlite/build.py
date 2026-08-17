@@ -21,7 +21,6 @@ import nbformat
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
-DEFAULT_VENV = Path(r"C:\plrlite\venv") if sys.platform == "win32" else None
 
 # The real workshops, browser-ready. Each is copied into content/ with a
 # bootstrap cell prepended; data/ and figs/ ship alongside so `../data` and
@@ -57,16 +56,14 @@ print("DATA_OK")
 
 
 def python():
-    if DEFAULT_VENV and DEFAULT_VENV.is_dir():
-        return DEFAULT_VENV / "Scripts" / "python.exe" if sys.platform == "win32" \
-            else DEFAULT_VENV / "bin" / "python"
-    if shutil.which("python"):
-        return "python"
-    raise SystemExit(
-        "no build venv found. Expected one of:\n"
-        f"  {DEFAULT_VENV} (Windows short-path venv)\n"
-        "  a 'python' on PATH with jupyterlite-core installed"
-    )
+    """The interpreter to run JupyterLite with.
+
+    Always the interpreter that invoked this script. CI provisions whatever
+    host-side dependencies are needed; the build must not guess at local venv
+    names. On Windows the caller is expected to run this from an environment
+    with jupyterlite installed (see README for the short-path venv note).
+    """
+    return sys.executable
 
 
 def _workshops() -> None:
@@ -180,39 +177,32 @@ def _assemble_deploy(deploy: Path, out_dir: Path) -> None:
 
 
 def _build_deck() -> None:
-    """Regenerate the deck iframe document from the installed PyLabRobot.
+    """Regenerate the deck iframe document in-process.
 
-    Needs ``pylabrobot`` + ``plr_workshops`` (for ``frontend.build_page``) with
-    the vendored inline assets populated (``python -m plr_workshops.vendor``).
-    The deck is generated host-side, never inside the kernel.
+    Requires ``pylabrobot`` (for ``frontend.build_page``) importable in the
+    interpreter that invoked this script, with ``plr_workshops/_vendored/``
+    present (the pinned konva + shrunk logo, committed). This is a host-side
+    artifact -- never inside the kernel.
 
-    Strategy: run the page build in a subprocess so a bare build interpreter
-    (e.g. the Windows lite venv) can delegate to one that has the package. The
-    repo root comes from this module's own path -- never a hardcoded machine
-    path, which is how a local Windows checkout would break CI on Linux.
+    Failure is fatal: a deploy root containing a zero-byte deck.html is worse
+    than no build, so a missing/empty deck aborts the build.
     """
     out = HERE / "deck.html"
-    repo = REPO
-    code = (
-        "import sys\n"
-        f"sys.path.insert(0, {str(repo)!r})\n"
-        "from plr_workshops.frontend import build_page\n"
-        f"open({str(out)!r}, 'w', encoding='utf-8').write(build_page(name='Deck', chrome='deck'))\n"
-    )
-    # Prefer the interpreter running this script (CI: the setup-python one with
-    # everything installed); on Windows fall back to the cookbook venv which has
-    # plr_workshops + pylabrobot + Pillow.
-    candidates = [sys.executable]
-    if sys.platform == "win32":
-        candidates.append(str(Path(r"C:\Users\stefa\plr-class\bme590-fall-2025\.venv-cookbook\Scripts\python.exe")))
-    for cand in candidates:
-        proc = subprocess.run([cand, "-c", code], capture_output=True, text=True)
-        if proc.returncode == 0:
-            print(f"  deck.html -> {out}")
-            return
-        print(f"  (deck.html attempt {cand}: "
-              f"{(proc.stderr or proc.stdout).strip().splitlines()[-1] if (proc.stderr or proc.stdout) else 'failed'})")
-    print("  (skip deck.html: no interpreter with plr_workshops + pylabrobot found)")
+    sys.path.insert(0, str(REPO))
+    try:
+        from plr_workshops.frontend import build_page
+
+        html = build_page(name="Deck", chrome="deck")
+    except Exception as exc:  # noqa: BLE001
+        raise SystemExit(
+            f"deck.html generation failed: {type(exc).__name__}: {exc}\n"
+            "  The build interpreter needs pylabrobot and plr_workshops; the "
+            "pinned visualizer assets must be in plr_workshops/_vendored/."
+        ) from exc
+    out.write_text(html, encoding="utf-8")
+    if out.stat().st_size == 0:
+        raise SystemExit("deck.html generated but is empty; aborting")
+    print(f"  deck.html -> {out} ({out.stat().st_size:,} bytes)")
 
 
 _FETCH_WHEELS = r"""
@@ -243,22 +233,16 @@ KERNEL_MODULES = ("__init__.py", "transport.py", "inline.py", "jupyterlite_bridg
 # pyodide_transport (host-side), which the kernel does not need.
 _KERNEL_INIT = '''"""bme590-workshops: the PyLabRobot browser glue.
 
-Only what a JupyterLite kernel needs: the transport abstraction, InlineVisualizer,
-and the JupyterLite bridge (patch_visualizer). The host-side build tools and the
-old hand-rolled demo are deliberately excluded from this wheel.
+Only what a JupyterLite kernel needs. Import submodules explicitly::
+
+    from plr_workshops.inline import InlineVisualizer
+    from plr_workshops.jupyterlite_bridge import patch_visualizer
+
+This namespace stays importable with no side effects (no eager pylabrobot
+import), which is what makes it safe in the browser.
 """
 
-from .inline import InlineVisualizer
-from .jupyterlite_bridge import BrowserVisualizer, JupyterLiteBridgeTransport, patch_visualizer
-from .transport import VisualizerTransport
-
-__all__ = [
-  "BrowserVisualizer",
-  "InlineVisualizer",
-  "JupyterLiteBridgeTransport",
-  "VisualizerTransport",
-  "patch_visualizer",
-]
+__version__ = "0.1.0"
 '''
 
 
