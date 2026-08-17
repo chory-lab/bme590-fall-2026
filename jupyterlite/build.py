@@ -110,6 +110,8 @@ def _workshops() -> None:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default=str(HERE / "output"))
+    parser.add_argument("--deploy", default=None,
+                        help="Assemble a Pages-servable root here after building")
     parser.add_argument("--refresh-wheels", action="store_true",
                         help="Re-download wheels into pypi/ from PyPI")
     args = parser.parse_args()
@@ -154,34 +156,62 @@ def main():
         raise SystemExit(f"jupyterlite build failed: rc={proc.returncode}")
     print(f"\nbuilt -> {out_dir}")
 
+    if args.deploy:
+        _assemble_deploy(Path(args.deploy), out_dir)
+
+
+def _assemble_deploy(deploy: Path, out_dir: Path) -> None:
+    """Lay out a Pages-servable root: index.html (our page) beside the
+    JupyterLite output, the deck page, and the host bridge.
+
+    The result is a static directory a file server (or GitHub Pages) can serve
+    directly; ``index.html`` is ``outer.html`` which iframes ``output/lab`` and
+    ``deck.html`` and loads ``bridge.js``.
+    """
+    if deploy.exists():
+        shutil.rmtree(deploy)
+    deploy.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(HERE / "outer.html", deploy / "index.html")
+    shutil.copy2(HERE / "bridge.js", deploy / "bridge.js")
+    shutil.copy2(HERE / "deck.html", deploy / "deck.html")
+    shutil.copytree(out_dir, deploy / "output")
+    print(f"deploy root -> {deploy} (index.html + output/ + deck.html + bridge.js)")
+
 
 def _build_deck() -> None:
     """Regenerate the deck iframe document from the installed PyLabRobot.
 
-    Requires ``pylabrobot`` + ``plr_workshops`` importable from the *build*
-    interpreter (the one running this script), with the vendored inline assets
-    populated (``python -m plr_workshops.vendor``). The deck is a generated
-    artifact like the wheels -- kept out of git, rebuilt with the site.
+    Needs ``pylabrobot`` + ``plr_workshops`` (for ``frontend.build_page``) with
+    the vendored inline assets populated (``python -m plr_workshops.vendor``).
+    The deck is generated host-side, never inside the kernel.
+
+    Strategy: run the page build in a subprocess so a bare build interpreter
+    (e.g. the Windows lite venv) can delegate to one that has the package. The
+    repo root comes from this module's own path -- never a hardcoded machine
+    path, which is how a local Windows checkout would break CI on Linux.
     """
     out = HERE / "deck.html"
-    # build.py may run under a bare interpreter (e.g. the lite venv) that lacks
-    # plr_workshops; delegate to the cookbook venv which has pylabrobot + the
-    # package + Pillow. If that venv is absent, skip -- deck.html is committed
-    # nowhere and only needed for a full local serve.
-    for cand in (Path(r"C:\Users\stefa\plr-class\bme590-fall-2025\.venv-cookbook\Scripts\python.exe"),
-                 shutil.which("python")):
-        if not cand:
-            continue
-        code = (
-            "import sys; sys.path.insert(0, r'C:\\Users\\stefa\\plr-class\\bme590-fall-2025'); "
-            "from plr_workshops.frontend import build_page; "
-            f"open(r'{out}', 'w', encoding='utf-8').write(build_page(name='Deck', chrome='deck'))"
-        )
-        proc = subprocess.run([str(cand), "-c", code], capture_output=True, text=True)
+    repo = REPO
+    code = (
+        "import sys\n"
+        f"sys.path.insert(0, {str(repo)!r})\n"
+        "from plr_workshops.frontend import build_page\n"
+        f"open({str(out)!r}, 'w', encoding='utf-8').write(build_page(name='Deck', chrome='deck'))\n"
+    )
+    # Prefer the interpreter running this script (CI: the setup-python one with
+    # everything installed); on Windows fall back to the cookbook venv which has
+    # plr_workshops + pylabrobot + Pillow.
+    candidates = [sys.executable]
+    if sys.platform == "win32":
+        candidates.append(str(Path(r"C:\Users\stefa\plr-class\bme590-fall-2025\.venv-cookbook\Scripts\python.exe")))
+    for cand in candidates:
+        proc = subprocess.run([cand, "-c", code], capture_output=True, text=True)
         if proc.returncode == 0:
             print(f"  deck.html -> {out}")
             return
-        print(f"  (deck.html: {proc.stderr.strip().splitlines()[-1] if proc.stderr else 'failed'})")
+        print(f"  (deck.html attempt {cand}: "
+              f"{(proc.stderr or proc.stdout).strip().splitlines()[-1] if (proc.stderr or proc.stdout) else 'failed'})")
     print("  (skip deck.html: no interpreter with plr_workshops + pylabrobot found)")
 
 
