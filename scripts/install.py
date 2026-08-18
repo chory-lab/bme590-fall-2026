@@ -433,13 +433,14 @@ def register_kernel(root: Path) -> None:
 
 
 def next_steps(root: Path) -> str:
+    shell = "PowerShell" if WINDOWS else "Terminal"
     return f"""
 =================================================
  Done. Next steps:
 =================================================
-  1. Open a new terminal, and go to the class folder:
+  1. Open a new {shell} window, then run this command to go to the class folder:
        cd {root}
-  2. Copy the workshop you are starting and open it in VS Code:
+  2. Run this command to copy the workshop and open it in VS Code:
        uv run bme590 start 01
      (your copy lands in assignments, where class updates cannot overwrite it)
   3. If VS Code asks, pick the kernel "BME 590 (lab automation)".
