@@ -57,3 +57,5 @@ This copies workshop 01 into `assignments/`, opens it in VS Code, and selects th
 ## Help
 
 If something's broken: run `uv run python scripts/doctor.py` and paste the **entire** output into `#ed-discuss` on Slack, or email Stefan (stefan dot golas at duke dot edu).
+
+If a new terminal says `command not found: uv` (macOS / Linux) or `uv is not recognized` (Windows), just re-run the install command above — it makes new terminals find uv (by adding `~/.local/bin` to your shell's PATH on macOS / Linux).

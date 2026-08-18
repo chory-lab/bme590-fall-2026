@@ -21,6 +21,27 @@ RAW='https://raw.githubusercontent.com/chory-lab/bme590-fall-2026/main'
 if [ -t 1 ]; then C='\033[36m'; R='\033[31m'; Z='\033[0m'; else C=''; R=''; Z=''; fi
 die() { printf "\n${R}INSTALL FAILED: %s${Z}\n" "$1" >&2; exit 1; }
 
+# The astral installer claims to edit a shell profile, but its choice of file is
+# unreliable (it sometimes targets ~/.profile, which zsh never reads), so a fresh
+# Terminal can still report "command not found: uv" even though uv installed
+# fine. Guarantee the path for future shells ourselves, and say what we changed.
+# Only for the default per-user location; if uv lives somewhere else on PATH,
+# whatever put it there already handles this.
+ensure_uv_findable() {
+  case "${UV-}" in "$HOME/.local/bin/uv") ;; *) return 0 ;; esac
+  case "${SHELL-}" in
+    *zsh*)  RC="$HOME/.zshrc" ;;
+    *bash*) RC="$HOME/.bashrc" ;;
+    *)      RC="$HOME/.profile" ;;
+  esac
+  if [ -f "$RC" ] && grep -q 'HOME/.local/bin' "$RC"; then
+    return 0
+  fi
+  # >> creates the file if a fresh Mac has no rc file yet; never truncate.
+  printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$RC" 2>/dev/null || return 0
+  echo "  added uv to PATH in $RC (new terminals will find it)"
+}
+
 printf "${C}==> Checking for uv${Z}\n"
 
 # uv is the package manager: one static ~35 MB executable, installed per-user
@@ -47,6 +68,7 @@ https://github.com/astral-sh/uv/releases, put it on your PATH, and run this agai
 fi
 echo "  OK  uv at $UV"
 UV_BIN="$UV"; export UV_BIN
+ensure_uv_findable
 
 # The installer proper: use the copy beside this script when there is one (a real
 # checkout), otherwise fetch the single file it needs.
