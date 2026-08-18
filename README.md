@@ -22,9 +22,24 @@ Takes 1–3 minutes. Re-run it any time to update.
 
 ## Get started
 
-From the class folder, open a workshop:
+The installer puts the class materials in your **home folder**, which is where a new terminal starts:
+
+- Windows: `C:\Users\<YourName>\bme590-fall-2026`
+- macOS: `/Users/<YourName>/bme590-fall-2026`
+
+The installer's "Next steps" message prints the exact path — use that one if you chose a different folder. From a new terminal, go there and open a workshop:
+
+**Windows** (PowerShell):
+
+```powershell
+cd $HOME\bme590-fall-2026
+uv run bme590 start 01
+```
+
+**macOS / Linux** (Terminal):
 
 ```bash
+cd ~/bme590-fall-2026
 uv run bme590 start 01
 ```
 
