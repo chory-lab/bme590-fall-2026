@@ -20,6 +20,47 @@ dependencies = [
   "pylabrobot==0.2.2",
 ]
 
+# The per-session entry point: `uv run bme590 start 01` and friends. Available
+# because the installers install this project into .venv alongside its
+# dependencies.
+[project.scripts]
+bme590 = "plr_workshops.cli:main"
+
+# The student desktop install. `uv sync` installs the project plus this group,
+# so one command produces the environment the workshops run in. Kept as a
+# dependency-group, not an extra, so it never lands in the browser wheel.
+#
+# Why these: ipykernel is what VS Code needs to run .ipynb against .venv;
+# ipywidgets backs the visualizer's widget rendering; pandas/numpy/pillow are
+# imported by the notebooks themselves; nbformat is what scripts/doctor.py reads
+# them with. `[opentrons]` adds the Opentrons labware definitions workshop 04
+# uses. Everything here is a pure-Python or prebuilt wheel on all three
+# platforms — no compiler, no git, no conda.
+#
+# jupyterlab is deliberately NOT here. It is the largest single download in the
+# tree (it roughly doubles a cold install) and VS Code's Jupyter extension is
+# the documented editor, so it lives in its own group for students who want a
+# browser editor and for CI, which executes the notebooks.
+[dependency-groups]
+class = [
+  "pylabrobot[opentrons]==0.2.2",
+  "ipykernel>=6.29",
+  "ipywidgets>=8.1",
+  "nbformat>=5.10",
+  "pandas>=2.2",
+  "numpy>=1.26",
+  "pillow>=10.3",
+]
+notebook = [
+  "jupyterlab>=4.2",
+  "nbclient>=0.10",
+]
+
+# Make `uv sync` (no flags) mean "the student environment". The installers rely
+# on this: any extra flag a student has to type is a step that can go wrong.
+[tool.uv]
+default-groups = ["class"]
+
 [tool.setuptools]
 packages = ["plr_workshops"]
 

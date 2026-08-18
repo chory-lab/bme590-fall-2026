@@ -14,214 +14,172 @@ Please follow these steps in order and if you run into any issues, please send a
 
 ---
 
-## Step 1: Install Foundational Tools (VS Code & Git)
+## Step 1: Install everything, with one command
 
-Before we can work with Python, we need a code editor and a version control system. [**If you already have these installed, you may skip to Step 2.**]
+You need **one** thing installed by hand: [**VS Code**](https://code.visualstudio.com/), the editor we use in this class. Install it, then run the command below for your operating system.
 
-1. **Install VS Code**: This is our recommended code editor, or integrated development environment (IDE), for this class. Please install the version relevant to your operating system at the following link. After installation, you should be able to open Visual Studio Code on your computer. We ask, unless you know what you are doing, to stick with VS code for this class as it will make debugging IDE issues consistent.
+Everything else — Python, the `pylabrobot` library, the class materials, the VS Code settings — is installed by the command. It needs no administrator rights, does not touch any Python you already have, and is safe to run more than once.
 
-    - [**Install Link**](https://code.visualstudio.com/)
+**Windows** — open **PowerShell** (search "PowerShell" in the Start menu) and paste:
 
-If you have installed it properly, you should see a setup screen similar to the screenshot below:
+```powershell
+irm https://raw.githubusercontent.com/chory-lab/bme590-fall-2026/main/install.ps1 | iex
+```
 
-![Screenshot of VS Code Setup Screen on Mac](/figs/vscode_ss.png)
+**macOS / Linux** — open **Terminal** and paste:
 
-From here, we recommend **creating a folder** somewhere on your computer (e.g. docs/classes/bme-590-fall/) to store your code and projects for this class. After cloning the repository (see **step 3**), you can open this repository in VS Code by simply **Open Folder -> \<path_to_folder_you_created\bme590-fall-2026>**
+```bash
+curl -LsSf https://raw.githubusercontent.com/chory-lab/bme590-fall-2026/main/install.sh | sh
+```
 
-2. **Install Git**: This tool lets us download and manage the project code from GitHub. Additionally, although we will not make heavy use of version control in this class, managing versions of software as they evolve is critical in software engineering, especially when working on a team on a project that needs to be collaborative and reproducible (as science often is). If you are interested in reading more about Git, see [here](https://git-scm.com/book/en/v2/Getting-Started-What-is-Git%3F).
-    - [**Install Link**](https://git-scm.com/downloads)
-        - For Mac, open the **terminal** then install [brew](https://brew.sh/) if not installed, then follow the **Homebrew Git Install Instructions** on the link above.
-        - For Windows users, it is **highly recommended** to install Windows Subsystem for Linux (WSL) first (see below) then follow the **Debian/Ubuntu Git Install Instructions**. To do this, first follow **Step 1.3** below, then return to install Git. But, if you wish to use Windows, utilize the **Click here to download** button on the Windows install page (not recommended).
-        - To confirm you have installed Git successfully, run the following in either **PowerShell, WSL, or the Mac Terminal**. You should see something similar to `git version 2.XX.X`
+Expect it to take **1–3 minutes**, most of which is downloading. When it finishes it prints the folder it installed into (`bme590-fall-2026` in your home folder) and the next steps.
 
-            ```bash
-            git --version
-            ```
+> **Windows users:** you do **not** need WSL, and you do **not** need Conda. Earlier versions of this class asked for both. Nothing in these workshops requires them, and every extra tool is another thing that can break.
 
-3. **(Windows Users Only) Install WSL**: The Windows Subsystem for Linux (WSL) lets you run Linux directly on Windows. It's highly recommended for a smoother experience overall. Most coding packages may work on Windows, but all coding packages (with extremely few exceptions) work on Linux. If you'd like to read more on WSL, see [here](https://learn.microsoft.com/en-us/windows/wsl/about). For more information on how to use WSL with VS Code (**recommended reading for Windows users!**), see [here](https://code.visualstudio.com/docs/remote/wsl)
-    - Open **PowerShell as an Administrator** (search for PowerShell, right-click, and select "Run as administrator").
-    - Run this single command:
+If you already have a copy of the repository, you can instead double-click **`Install-Windows.cmd`** (Windows) or **`Install-macOS.command`** (Mac) inside it. On a Mac, if it says the file is "from an unidentified developer", right-click it and choose **Open** — or just use the Terminal command above, which is not subject to that check.
 
-        ```powershell
-        wsl --install
-        ```
+### If the network is the problem
 
-    - After it finishes, **restart your computer**. When it reboots, it will ask you to create a username and password for your new Linux system. Remember these!
-        - Optionally, do not set a password.
-        - If you have **forgotten your WSL password**, see instructions on resetting it [here](https://superuser.com/questions/1829481/how-to-reset-my-wsl-ubuntu-password)
-    - Finally, to use with VS Code, navigate within VS Code to **Extensions -> Search -> WSL -> Install** (it is the one authored by Microsoft). You can then use VS Code with the following pattern:
+The install downloads about 130 MB. On a conference-grade Wi-Fi network, or one that inspects TLS traffic, that can crawl or fail outright. For those cases we publish an **offline bundle** per platform on the [Releases page](https://github.com/chory-lab/bme590-fall-2026/releases) — one file containing every package *and* the Python interpreter:
 
-        1. Open WSL from Windows Explorer (this should open a terminal window)
-        2. Using the change directory (`cd`) command, navigate to your projects folder [you may have to make this with the make directory command (`mkdir`)].
-        3. Once in your target folder, simply run `code .` and VS Code will open.
-        4. If you run into errors with this process, you can open VS Code **first** then **WSL** (i.e. the converse to this process just described above). This can happen if you have not yet installed the WSL extension in VS Code.
+```powershell
+# Windows: with the bundle in your Downloads folder
+powershell -ExecutionPolicy Bypass -File install.ps1 -Wheelhouse "$HOME\Downloads\wheelhouse-windows-x86_64-py311.zip"
+```
 
----
+```bash
+# macOS / Linux
+sh install.sh --wheelhouse ~/Downloads/wheelhouse-macos-arm64-py311.zip
+```
 
-## Step 2: Install Conda for Python Management
+Download the bundle matching your machine (`windows-x86_64`, `macos-arm64` for Apple silicon, `macos-x86_64` for Intel Macs, `linux-x86_64`). The install then needs **no network at all** and takes about a minute. A bundle that also happens to be sitting next to the installer is picked up automatically, so a TA can hand out a USB stick with both files on it.
 
-Conda is a package manager that will install Python and all our required libraries in an isolated environment. Because different projects require different **versions** of different packages and Python, using the same set of software for all your projects will likely lead to **conflicts**. 
+### What the installer actually does
 
-Conda (and other more modern package managers like [uv](https://docs.astral.sh/uv/)) allows us to create an individualized environmemt **specific to this class**, with its own version of Python, NumPy, PyLabRobot, and other packages that are independent from the other packages you may have installed on your system. **Again, if you already have conda installed, you may skip this step.**
+Worth reading once, so that nothing here is magic. The command you paste is a
+short bootstrap whose only job is to obtain a Python; it then hands off to
+[`scripts/install.py`](./scripts/install.py), which does the rest:
 
-1. **Download Miniconda**: We'll use Miniconda, a minimal installer for Conda.
-    - [**Install Link**](https://www.anaconda.com/docs/getting-started/miniconda/install#quickstart-install-instructions)
-    - **Windows**: Again, it is **highly recommended** to use **WSL**, in which case you can follow the Linux/WSL instructions two bullets down. However, if using Windows, navigate to the **Windows PowerShell** install option. Open **Windows PowerShell** and copy/paste the commands listed.
-    - **macOS**: Navigate to the code block for your chip (the "M" series chips are "Apple silicon") and copy/paste the commands listed.
-    - **Linux/WSL**: Navigate to the **Linux** tab and copy-paste the commands listed into your **WSL or Linux terminal**.
-    - Make sure to enter `yes` when agreeing to the terms of service.
-
-2. **Restart Your Terminal**: Close and reopen your terminal (or VS Code) for the changes to take effect.
-
-3. **Test Conda:** Test your install by running the following command `conda --version`. At this point if you get an error along the lines of `conda command not found` then please raise an issue in slack or contact Ben.
-    ```bash
-        conda --version
-    ```
+1. Installs [**uv**](https://docs.astral.sh/uv/), a single small program that manages Python versions and packages. It lives in your user folder and needs no admin rights. (uv is fetched by `curl` / PowerShell, which your OS already has; uv then fetches Python 3.11. That's the whole chain.)
+2. Downloads the class materials (using Git if you have it, a `.zip` if you don't).
+3. Creates a `.venv` folder inside the class folder, holding **Python 3.11** and every package the workshops need. It installs the exact versions pinned in `uv.lock`, so the whole class runs identical software — which is what makes problems debuggable.
+4. Writes `.vscode/settings.json` so VS Code already points at that Python. (This is the step people most often got wrong by hand.)
+5. Installs the **Python** and **Jupyter** VS Code extensions, if VS Code's `code` command is available.
+6. Registers a Jupyter kernel named **BME 590 (lab automation)**.
+7. Runs a self-test: it checks every `pylabrobot` import the workshops use, then runs a small pipetting protocol end to end.
 
 ---
 
-## Step 3: Set Up the Project Environment
+## Step 2: Open the class folder and run a workshop
 
-Now we will download the project code and create a dedicated Conda environment for it.
+Every working session is **one command**, run from the class folder:
 
-1. **Open Your Terminal**:
-    - **Windows**: Open the **WSL terminal**. You can find it in your Start Menu (it will be named "Ubuntu" or similar).
-    - **macOS/Linux**: Open the standard **Terminal** app.
+```bash
+uv run bme590 start 01
+```
 
-2. **Clone the Project Repository**: Run the following command to download the project code.
+It makes your own copy of workshop 01 in `assignments/`, brings the environment up to date, opens the copy in VS Code with the kernel already selected, and prints a short reminder of how the visualizer and GIF recording work. Run `uv run bme590` on its own for the workshop list and the other commands:
 
-    ```bash
-    git clone https://github.com/chory-lab/bme590-fall-2026.git
-    ```
+| Command | What it does |
+|---|---|
+| `uv run bme590 start 01` | copy workshop 01 and open it, ready to run |
+| `uv run bme590 check` | verify the install; prints a report you can paste into Slack |
+| `uv run bme590 update` | pull the latest materials and match the environment to them |
+| `uv run bme590 lab` | work in JupyterLab instead of VS Code |
 
-    This will install to your parent directory. If you would like to install to a different folder, such as your desktop, navigate to a new directory. For example: 
+> Work in `assignments/`, and **keep it inside the class folder**. The notebooks load figures and data files by relative path (`../figs/`, `../data/`), so a copy on your Desktop will show no images and fail to read `cloning.csv` — which looks exactly like a broken install, but isn't one. `bme590 start` puts the copy in the right place for you.
 
-   ```bash
-    cd Desktop/
-    ```
+<details>
+<summary>The same thing by hand, if you would rather see the steps</summary>
 
-3. **Navigate into the Project Folder**:
-
-    ```bash
-    cd bme590-fall-2026
-    ```
-
-4. **Create and Activate the Conda Environment**: This command creates a new, clean environment named `lab-automation` with Python 3.13.
+1. Open VS Code → **File → Open Folder…** → choose the `bme590-fall-2026` folder the installer reported. Open the *folder*, not just a file: the folder is what carries the settings that point at the right Python.
+2. If VS Code offers to install the **Python** and **Jupyter** extensions, accept.
+3. Copy the workshop you're starting into `assignments/`:
 
     ```bash
-    conda env create -f environment.yaml
-    conda activate lab-automation
+    uv run python scripts/start_workshop.py 01
     ```
 
-    Your terminal prompt should now start with `(lab-automation)` and you are all set! **Note:** In order to easily use your environment within VS Code, You will need to install the **Python** extension. (More on this in section below).
+4. Open your copy from the VS Code file tree and press **Run** on the first cell. The notebooks name the kernel the installer registered, so you should not be asked to choose one; if you are, pick **BME 590 (lab automation)**.
 
-   If you are using an **older Mac**, then you may run into a very specific bug where NumPy does not compile due to the lack of a high-enough version C++ compiler. If this happens to you contact Ben; you will need to uninstall and reinstall Xcode.
+</details>
 
-5. **Creating your own folder for assignments**: Now that you have your environment setup, it is good practice to **create a folder** that can hold your work-in-progess assignments for two reasons:
-    - We may, at any point, update the workshops with new material or edits to fix bugs. If you `git pull` the repo while working on a workshop file, you may **unintentionally overwrite** your work, losing all progress.
-    - If, for whatefver reason, you get your file completely messed up while working on it, it is easy to simply delete the file and copy over a fresh version to work. 
+### While you are working in a notebook
 
-    Once you are in the `bme590-fall-2026` directory, run the following to create a directory for your assignments-in-progress:
+- **The visualizer** opens in a browser tab at `http://127.0.0.1:1337`, and the top right should read **Connected**. If it doesn't, reload that page.
+- **Re-running a visualizer cell** leaves the old visualizer running, and your browser tab stays attached to *it* — so the deck looks frozen. Either restart the kernel, or use the helper that closes the old one first:
 
-    ```bash
-    mkdir assignments
+    ```python
+    from plr_workshops.workshop import visualizer, wait_for_recording
+
+    lh, vis = await visualizer(deck)   # safe to re-run as often as you like
     ```
 
-    Then, for **each lab**, simply **copy the workshop** from `/workshops` to `/assignments` via **VS Code** or the command line:
-
-    ```bash
-    cp workshops/<name_of_workshop>.ipynb assignments
-    ```
-
-    Now, make sure you are working and saving progress on the workshops you have copied over to `assignments/`. For all intents and purposes, this should be treated as your working directory.
-
-      ```bash
-    cd assignments
-    ```
+- **Recording a GIF** requires clicking **Start Recording** *before* the protocol cell runs. The workshops leave a five second window for it; `await wait_for_recording()` waits for you instead, which is easier to hit and still works when you have set `SLEEP = 0`.
+- **`SLEEP`** at the top of each notebook scales every pause. Set it to `0` to run at full speed once you have watched the protocol.
 
 ---
 
-## Step 4. How to Select Environment from VS Code
+## Step 3: Check your install, any time
 
-1. **Install Extension**: Navigate to the left-hand panel to the **Extensions** and in the bar entitled "Search Extensions in Marketplace", search for the following packages and click **"Install"**.
-    - **Python** - This extension will configure VS Code with several useful debugging, linting, virtual environment, and other tools for coding in Python.
-        - Example: ![Python Language Extension Highlight on VS Code](/figs/python_ext.png)
-        - A **linter** is a static code analysis tool used in software development to analyze source code and flag potential programming errors, bugs, stylistic issues, and suspicious constructs. 
+If anything looks wrong — an import fails, a notebook can't find `pylabrobot`, a cell errors in a way that seems unrelated to your code — run:
 
-    - **Jupyter** - The assignments in this class will make heavy use of **Jupyter Notebook**, which is an interactive coding environment (i.e. you can run individual "blocks" of code and interleave markdown text in assignment write-ups). Normally, you would run `jupyter notebook` from the command line in your proejct folder to open a browser-based editor; however, this extension allows you to open notebooks directly in VS Code.
-        - Example: ![Jupyter Language Extension Highlight on VS Code](/figs/jupyter_ext.png)
+```bash
+uv run python scripts/doctor.py
+```
 
-    - **WSL (Windows Users Only)** - WSL maintains an entire sub-operating system (subsystem) with its own folders in Linux. Normally, to access these, you would need to open up WSL then navigate to your folder of interest, then open VS Code. This extension allows you to directly connect to your own machine's WSL from VS Code, essentially treating your Linux folders as a normal Windows directory.
-        - Example: ![WSL Extension Highlight on VS Code](/figs/wsl_ext.png)
+It prints your Python version and location, checks every package and workshop import, and runs a pipetting smoke test. **Paste its entire output into the `#pylabrobot` Slack channel** when you ask for help; it contains nearly everything we need to diagnose a broken environment, and a screenshot of a single red line usually does not.
 
-2. **Activate Conda Environment**: Once you have VS Code, Git, your VS Code extensions, and Conda installed and working on your computer, your project workflow will occur along the following steps:
-    - **Starting from VS Code**
-        - Open VS Code on Mac or Windows
-        - Go to **Explorer -> Open Folder** and open your projects folder where you plan to store your work for this class. (ideally, this should be the repository foler `bme590-fall-2026`)
-            - **WSL Users** - Follow the instructions [here](https://code.visualstudio.com/docs/remote/wsl) under **From VS Code** or use the command palette (Ctrl/Cmd + Shift + P) to select **WSL: Connect to WSL** to open your Linux folders in your WSL instance.
-        - **Important:** Open the terminal in VS Code and run `git pull` to retrieve any updates to the course repo before beginning work.
-        - Using the command palette (Ctrl/Cmd + Shift + P), search for **Python: Select Interpreter** and then navigate the options to select the **(lab-automation)** environment.
-            - Example: ![Example in VS Code of Python Interpreter Drop Down Menu](/figs/python_int.png)
-        - Open or create a **\.ipynb** or **\.py** file in your working directory to begin your coding!
-            - A **.py** file is a standard Python file while **.ipynb** file is an interactive notebook. You likely will want to use the latter.
-        - Once finished, make sure to save your work locally and exit VS Code.
-    - **Starting from Terminal**
-        - Open **WSL, PowerShell, or Mac Terminal** and navigate to your projects folder.
-        - Activate your conda environment using `conda activate lab-automation`.
-        - **Important:** Open the terminal in VS Code and run `git pull` to retrieve any updates to the course repo before beginning work.
-        - Open your editor of choice (CLI editors such as Neovim/etc. are not recommended unless you are proficient) such as VS Code with the `code .` command.
-            - You may optionally also use `jupyter notebook` to open a browser based editor instead of VS Code.
-        - Similarly edit and save your files as you see fit, making sure to save your work.
+Running commands in a terminal that don't start with `uv run`? Activate the environment first, so that plain `python` means the class's Python:
+
+```bash
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+# macOS / Linux
+source .venv/bin/activate
+```
+
+Or simply prefix any command with `uv run`, which needs no activation at all.
 
 ---
 
-## Step 5. Accessing Workshops
+## Step 4: Updating to the latest version
 
-All of the relevant workshop documents can be found in the [workshops folder](./workshops). These Jupyter Notebook files contain all of the relevant information you will need for the exercises to work. If you have properly installed the **Jupyter Notebook** extension in VS Code, then these files should open no problem.
+We fix bugs and improve the workshops during the semester. To get the latest materials **and** any new packages they need, re-run the installer command from Step 1. It updates in place: it pulls the new materials, installs anything new, and re-runs the self-test.
 
-In this class, we encourage you to **try the above installation and run Pylabrobot locally** for several reasons:
-1. If you are targeting a career in software engineering, environment setup teaches a lot about how software works together on different operating systems, and running into issues is one of the best ways to learn one of the untaught challenges with software engineering.
-2. We would like as much of the class to be using **the same version of PLR and environment setup** to make troubleshooting easier.
+If you prefer to do it by hand from inside the class folder:
+
+```bash
+git pull
+uv sync --frozen
+```
+
+Your work in `assignments/` is never touched by either route. This is the reason for the copy step — if you edit the files in `workshops/` directly, an update can collide with your changes.
 
 ---
 
-## Step 6. Updating to the Latest Version
+## Advanced: installing with Conda instead
 
-We are periodically improving the workshops, so to make sure you always have the most recent versions of the course materials and workshops:
+The `uv` path above is the supported one, and the one we can help you debug. If you have a specific reason to use Conda — you already manage everything else that way, for example — `environment.yaml` builds the same environment:
 
-- **From VS Code**
-  - Open the integrated terminal in VS Code (``Ctrl+ `` on Windows/Linux, or ``Cmd+ `` on Mac).
-  - Confirm that your terminal is running inside your project folder. If not, navigate there using `cd path/to/project`.
-  - Ensure your conda environment is active with `conda activate lab-automation`.
-  - Run:
-    ```bash
-    git pull
-    ```
-    This command will fetch and merge the latest updates from the course repository into your local copy.
-  - If you encounter any merge conflicts, resolve them before continuing. Most often, this happens if you edited files that were also updated in the repo.
-  - After pulling, re-open or refresh your Jupyter Notebook files to ensure you are working from the latest versions.
+```bash
+conda env create -f environment.yaml
+conda activate lab-automation
+python scripts/doctor.py
+```
 
-**Reminder: Always copy workshops into your `assignments/` folder**
-
-To prevent overwriting your work when updating workshops, make sure you copy workshop files into your `assignments/` folder before working on them:
-
-- For each lab, copy the relevant workshop into your assignments folder:
-  ```bash
-  cp workshops/<name_of_workshop>.ipynb assignments/
-  ```
-
-- Move into the assignments folder and work there:
-  ```bash
-  cd assignments
-  ```
-
-For all intents and purposes, treat `assignments/` as your working directory. This ensures you keep your progress safe while still being able to pull the latest updates to the original workshops.
+This is slower (Conda's solver, rather than a pre-resolved lock file) and its package versions are pinned less tightly, so if you hit something the rest of the class doesn't, try the `uv` path before asking for help.
 
 ---
 
 ## Help Resources & Troubleshooting
 
 If you are having issues with installing or running PyLabRobot locally, please reach out to the TA for help.
+
+**Before you ask, do these two things** — between them they fix or diagnose most problems:
+
+1. Re-run the installer command from Step 1. It is safe to run repeatedly and repairs a half-finished install.
+2. Run `uv run python scripts/doctor.py` and copy its **entire** output into your message.
 
 If at any point in this process you run into troubles installing the requisite software, please follow the order of steps below:
 

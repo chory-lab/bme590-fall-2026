@@ -1,17 +1,29 @@
+# FALLBACK install path. The supported one is `uv sync` (see README Step 1),
+# which resolves from uv.lock and so pins every transitive dependency; this file
+# pins only the direct ones. Kept for students who already run everything
+# through Conda, and for the CI job that guards that path.
+#
+# PyLabRobot 0.2.2 is installed from PyPI as a pure-Python wheel. It used to be
+# installed from a GitHub commit on the theory that no PyPI release existed --
+# it does (pylabrobot-0.2.2-py3-none-any.whl), and installing from git dragged
+# in a hard requirement on Git plus a source build, which is what produced the
+# "NumPy won't compile, reinstall Xcode" failures on older Macs.
+#
+# No system libraries are needed on any platform: PyLabRobot guards its
+# libusb/hidapi imports (io/usb.py sets USE_USB = False when pyusb is absent),
+# and the hardware extras that would pull them in are not installed here.
 name: lab-automation
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - python=3.11
-  - jupyter
-  - jsonschema
   - pip
   - pandas
   - numpy
   - pillow
+  - nbformat
+  - ipykernel
+  - ipywidgets
+  - jupyterlab
   - pip:
-    # PyLabRobot 0.2.2, installed from the GitHub repo (no PyPI release tag
-    # exists; dd79c4c is the 0.2.2 release commit). The workshops' APIs were
-    # verified against this exact tree.
-    - "pylabrobot[visualizer,opentrons] @ git+https://github.com/PyLabRobot/pylabrobot.git@dd79c4c"
+    - "pylabrobot[opentrons]==0.2.2"

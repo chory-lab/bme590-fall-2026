@@ -1,0 +1,75 @@
+name: Offline bundles
+
+# Builds the offline install bundles (see scripts/build_wheelhouse.py): one per
+# platform, each holding every wheel the class environment needs plus a Python
+# 3.11 interpreter, so `install.sh --wheelhouse <zip>` works with no network.
+#
+# Wheels are platform-specific, so this has to run on each platform rather than
+# cross-building. Bundles are attached to a release when triggered by one, and
+# otherwise uploaded as workflow artifacts for testing.
+#
+# Rebuild whenever uv.lock changes -- a bundle records the lock's sha256 and the
+# installer refuses one that does not match, so a stale bundle degrades to a
+# normal online install rather than a wrong environment.
+
+on:
+  release:
+    types: [published]
+  push:
+    paths:
+      - "uv.lock"
+      - "scripts/build_wheelhouse.py"
+      - ".github/workflows/wheelhouse.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: bundle (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    # Only the release-upload step needs write access; the rest is read-only.
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, label: linux-x86_64 }
+          - { os: macos-14,      label: macos-arm64 }
+          - { os: macos-13,      label: macos-x86_64 }
+          - { os: windows-latest, label: windows-x86_64 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Build the bundle
+        run: uv run --no-project scripts/build_wheelhouse.py
+
+      # Proves the bundle installs before anyone hands it to a student: no
+      # network for packages (--offline is enforced inside the installer's bundle
+      # path), and a fresh interpreter directory so the bundled Python is what
+      # gets used.
+      - name: Install from the bundle, offline
+        shell: bash
+        run: |
+          set -eux
+          bundle=$(ls dist/wheelhouse-*.zip | head -1)
+          rm -rf .venv
+          uv run --no-project scripts/install.py --wheelhouse "$bundle" --skip-vscode
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheelhouse-${{ matrix.label }}
+          path: dist/wheelhouse-*.zip
+          if-no-files-found: error
+
+      - name: Attach to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/wheelhouse-*.zip --clobber
