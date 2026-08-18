@@ -20,10 +20,18 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# Piped through `irm ... | iex`, this script runs in the caller's session, so
+# `exit` would close the caller's whole PowerShell window -- including any error
+# message still on screen. `$PSScriptRoot` is empty only in that case, which is
+# how we tell the two apart: when run as a file we exit with a code (CI depends
+# on it), when piped we leave the session alone.
+$InvokedViaIex = -not $PSScriptRoot
+
 $Raw = 'https://raw.githubusercontent.com/chory-lab/bme590-fall-2026/main'
 
 function Die ($m) {
   Write-Host "`nINSTALL FAILED: $m" -ForegroundColor Red
+  if ($InvokedViaIex) { throw 'Install aborted -- see the message above.' }
   exit 1
 }
 
@@ -81,4 +89,14 @@ if ($Root)       { $passthrough += @('--root', $Root) }
 # --no-project: run against a bare interpreter, not the class environment, which
 # does not exist yet. uv downloads that interpreter if the machine has none.
 & $uv run --no-project --python 3.11 $installer @passthrough
-exit $LASTEXITCODE
+
+if ($InvokedViaIex) {
+  # Running in the caller's session: do not exit (that would close their
+  # window). Report the result instead; install.py has already printed the
+  # details above.
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "`nINSTALL FAILED (exit code $LASTEXITCODE). See the message above, or re-run to start over." -ForegroundColor Red
+  }
+} else {
+  exit $LASTEXITCODE
+}
