@@ -64,4 +64,15 @@ fi
 
 # --no-project: run against a bare interpreter, not the class environment, which
 # does not exist yet. uv downloads that interpreter if the machine has none.
-exec "$UV" run --no-project --python 3.11 "$INSTALLER" "$@"
+#
+# Not `exec`: the script already runs in a child shell (piped `curl | sh`, or
+# `sh install.sh`), so exec buys nothing, and reporting the result ourselves
+# makes a failure unmistakable. install.py has already printed the details and
+# the transcript above; this is just the closing line.
+if "$UV" run --no-project --python 3.11 "$INSTALLER" "$@"; then
+  :
+else
+  code=$?
+  printf "\n${R}INSTALL FAILED (exit code %s). See the message above, or re-run to start over.${Z}\n" "$code" >&2
+  exit "$code"
+fi
