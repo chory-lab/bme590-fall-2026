@@ -235,7 +235,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         # Open the folder *and* the notebook: the folder is what carries
         # .vscode/settings.json, so opening the file alone would lose the
         # interpreter selection.
-        run([code, str(ROOT), str(notebook)])
+        #
+        # -n because passing both is not enough on its own. VS Code routes a file
+        # to a window whose workspace contains it, but when another window is
+        # already active the file can open *there* instead -- the class folder's
+        # window is still being created at that moment -- and the notebook ends up
+        # in a workspace where .vscode/settings.json does not apply. Forcing a new
+        # window makes the workspace deterministic. The cost is a second window
+        # when the folder is already open, which is a visible annoyance rather
+        # than a silently wrong environment.
+        run([code, "-n", str(ROOT), str(notebook)])
         print(f"\nOpened {notebook.relative_to(ROOT)} in VS Code.")
     else:
         print(f"\nYour copy is at {notebook.relative_to(ROOT)}")
