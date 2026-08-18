@@ -36,7 +36,14 @@ cd $HOME\bme590-fall-2026
 uv run bme590 start 01
 ```
 
-**macOS / Linux** (Terminal):
+**Windows** (Command Prompt):
+
+```bat
+cd %USERPROFILE%\bme590-fall-2026
+uv run bme590 start 01
+```
+
+**macOS / Linux** (Terminal — Git Bash on Windows is identical):
 
 ```bash
 cd ~/bme590-fall-2026
