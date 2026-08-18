@@ -433,20 +433,18 @@ def register_kernel(root: Path) -> None:
 
 
 def next_steps(root: Path) -> str:
-    sep = "\\" if WINDOWS else "/"
     return f"""
 =================================================
  Done. Next steps:
 =================================================
-  1. Open VS Code, then File > Open Folder... and choose:
-       {root}
-  2. Accept the "Python" and "Jupyter" extensions if VS Code offers them.
-  3. Make your own copy of the workshop you are starting:
-       uv run python scripts{sep}start_workshop.py 01
-     (it lands in assignments{sep}, where class updates cannot overwrite it)
-  4. Open that copy and pick the kernel "BME 590 (lab automation)" if asked.
+  1. Open a new terminal, and go to the class folder:
+       cd {root}
+  2. Copy the workshop you are starting and open it in VS Code:
+       uv run bme590 start 01
+     (your copy lands in assignments, where class updates cannot overwrite it)
+  3. If VS Code asks, pick the kernel "BME 590 (lab automation)".
 
-If anything ever looks wrong:  uv run python scripts{sep}doctor.py
+If anything ever looks wrong:  uv run bme590 check
 To update the course materials later, run the installer again.
 """
 
