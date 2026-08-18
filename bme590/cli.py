@@ -60,10 +60,48 @@ def run(cmd: list[str], **kwargs) -> int:
     except FileNotFoundError:
         print(f"could not run {cmd[0]} - it is not where PATH says it is")
         return 127
+    except subprocess.TimeoutExpired:
+        print(f"{cmd[0]} took too long and was stopped")
+        return 124
 
 
 def uv() -> str | None:
     return os.environ.get("UV_BIN") or shutil.which("uv")
+
+
+def find_code() -> str | None:
+    """The VS Code CLI, looked for where it lives as well as on PATH.
+
+    On macOS `code` reaches PATH only after the user runs "Shell Command: Install
+    'code' command in PATH", which nobody has done on a fresh machine -- so
+    `bme590 start` would print "open it yourself" to a student who has VS Code
+    installed exactly as the README asks. Kept in step with the copy in
+    scripts/install.py, which cannot import this module (it runs before the
+    environment exists).
+    """
+    on_path = shutil.which("code")
+    if on_path:
+        return on_path
+    if sys.platform == "darwin":
+        candidates = [
+            Path("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"),
+            Path.home() / "Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+        ]
+    elif WINDOWS:
+        candidates = [
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Microsoft VS Code/bin/code.cmd",
+            Path(os.environ.get("ProgramFiles", "")) / "Microsoft VS Code/bin/code.cmd",
+            Path(os.environ.get("ProgramFiles(x86)", "")) / "Microsoft VS Code/bin/code.cmd",
+        ]
+    else:
+        candidates = [Path("/usr/share/code/bin/code"), Path("/snap/bin/code"), Path("/usr/bin/code")]
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return str(candidate)
+        except OSError:
+            continue
+    return None
 
 
 def sync_if_needed() -> None:
@@ -160,7 +198,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 1
     notebook = matches[0]
 
-    code = shutil.which("code")
+    code = find_code()
     if code:
         # Open the folder *and* the notebook: the folder is what carries
         # .vscode/settings.json, so opening the file alone would lose the
@@ -169,7 +207,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         print(f"\nOpened {notebook.relative_to(ROOT)} in VS Code.")
     else:
         print(f"\nYour copy is at {notebook.relative_to(ROOT)}")
-        print("VS Code's `code` command is not on PATH - open that file from VS Code yourself.")
+        print("VS Code was not found - open that file from VS Code yourself.")
 
     busy = busy_ports()
     if busy:
@@ -222,7 +260,12 @@ def cmd_lab(args: argparse.Namespace) -> int:
 def cmd_update(args: argparse.Namespace) -> int:
     if shutil.which("git") and (ROOT / ".git").exists():
         print("pulling the latest course materials...")
-        if run(["git", "pull", "--ff-only"]) != 0:
+        # Never let git stop to ask a question: a credential or host-key prompt
+        # with nothing to answer it reads as a hang. Same reasoning, and the same
+        # variables, as scripts/install.py:git_env().
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "Never"}
+        env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
+        if run(["git", "pull", "--ff-only"], env=env, timeout=300) != 0:
             print(
                 "\ngit pull did not fast-forward. That usually means you edited files in\n"
                 "workshops/ directly. Your work in assignments/ is safe; ask on Slack\n"

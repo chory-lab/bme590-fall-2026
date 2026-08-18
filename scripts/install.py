@@ -196,6 +196,35 @@ def download_zip(root: Path) -> None:
                 shutil.copy2(item, target)
 
 
+def git_env() -> dict:
+    """An environment where git cannot stop to ask a question.
+
+    An installer blocked on an invisible prompt is indistinguishable from a
+    hang, and both prompts are reachable on an ordinary machine: a misconfigured
+    credential helper asks for a password even for a public repo, and a global
+    `url."git@github.com:".insteadOf https://github.com/` -- common on a machine
+    that already does development -- rewrites our HTTPS URL to SSH, which then
+    stops on the host-key question. Refusing to prompt turns either into a quick
+    failure, which the zip path can recover from.
+    """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GCM_INTERACTIVE"] = "Never"
+    env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
+    return env
+
+
+def git(args: list, timeout: int = 300) -> bool:
+    """Run a git command, reporting success. Never raises, never hangs."""
+    try:
+        return run(["git", *args], env=git_env(), timeout=timeout).returncode == 0
+    except subprocess.TimeoutExpired:
+        say("git took too long and was stopped")
+        return False
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
 def git_works() -> bool:
     """True only if git can actually answer.
 
@@ -210,35 +239,62 @@ def git_works() -> bool:
         return False
 
 
+def is_course_folder(path: Path) -> bool:
+    """Is this the class checkout, as opposed to some other Python project?
+
+    A uv.lock on its own is not evidence: the installer is normally fetched to a
+    temp directory and run from wherever the student's terminal happened to be,
+    so the current directory can easily be an unrelated project with a lock of
+    its own -- and treating that as the course folder would sync it against our
+    lock and overwrite its VS Code settings. Require what only this repo has.
+    """
+    return (path / "uv.lock").exists() and (path / "workshops").is_dir() and (path / "bme590").is_dir()
+
+
 def locate_course_files(explicit_root: Path | None) -> Path:
     here = Path(__file__).resolve().parent.parent
     if explicit_root:
         return explicit_root.resolve()
-    if (here / "uv.lock").exists():
+    if is_course_folder(here):
         say("running from inside a checkout")
         return here
-    if (Path.cwd() / "uv.lock").exists():
+    if is_course_folder(Path.cwd()):
         return Path.cwd()
 
     # Not Documents or Desktop: those are the folders OneDrive and iCloud Drive
     # sync by default, and letting a sync client walk a .venv (tens of thousands
     # of small files, some locked while Python runs) is slow and can break it.
     root = Path.home() / REPO_NAME
-    if (root / "uv.lock").exists():
+    if is_course_folder(root):
         say(f"found an existing copy at {root}")
         if git_works() and (root / ".git").exists():
             say("updating it with git pull")
-            if run(["git", "-C", root, "pull", "--ff-only"]).returncode != 0:
+            if not git(["-C", str(root), "pull", "--ff-only"]):
                 say("git pull did not fast-forward (you have local edits) - keeping your copy as is")
+        else:
+            # No history to pull from: this copy came from download_zip, and
+            # re-downloading is the only thing that makes "re-run the installer
+            # to update" true for it. Nothing here touches assignments/.
+            say("this copy came from a zip download - refreshing the course materials")
+            try:
+                download_zip(root)
+            except Exception as exc:  # noqa: BLE001 - last term's copy still runs
+                say(f"could not refresh them ({exc}) - continuing with the copy you have")
     elif git_works():
         say(f"cloning into {root}")
-        if run(["git", "clone", "--depth", "1", f"{REPO_URL}.git", root]).returncode != 0:
-            raise InstallError("git clone failed - check your network connection")
+        if not git(["clone", "--depth", "1", f"{REPO_URL}.git", str(root)]):
+            # Reachable without the network being at fault: the folder already
+            # exists with something in it, or git is configured in a way that
+            # cannot reach GitHub. The zip needs neither.
+            say("git clone did not work - downloading the files instead")
+            download_zip(root)
     else:
         download_zip(root)
 
-    if not (root / "uv.lock").exists():
-        raise InstallError(f"no uv.lock in {root} - delete that folder and run the installer again")
+    if not is_course_folder(root):
+        raise InstallError(
+            f"the course files in {root} look incomplete - delete that folder and run the installer again"
+        )
     return root
 
 
@@ -385,6 +441,43 @@ def install_from_bundle(uv: str, root: Path, bundle: Path) -> None:
 
 
 # --------------------------------------------------------------------- VS Code
+def find_code() -> str | None:
+    """The VS Code CLI, looked for where it lives as well as on PATH.
+
+    On macOS `code` is on PATH only after the user runs "Shell Command: Install
+    'code' command in PATH" from the palette, which nobody has done on a fresh
+    machine -- so a student who installed VS Code exactly as the README asks
+    still got "VS Code not found on PATH" and no extensions (observed in a real
+    install). The CLI ships inside the app bundle either way, so use it.
+
+    Mirrored in bme590/cli.py: this file is standalone by design (it runs before
+    any environment exists) and cannot import from the package.
+    """
+    on_path = shutil.which("code")
+    if on_path:
+        return on_path
+    if sys.platform == "darwin":
+        candidates = [
+            Path("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"),
+            Path.home() / "Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+        ]
+    elif WINDOWS:
+        candidates = [
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Microsoft VS Code/bin/code.cmd",
+            Path(os.environ.get("ProgramFiles", "")) / "Microsoft VS Code/bin/code.cmd",
+            Path(os.environ.get("ProgramFiles(x86)", "")) / "Microsoft VS Code/bin/code.cmd",
+        ]
+    else:
+        candidates = [Path("/usr/share/code/bin/code"), Path("/snap/bin/code"), Path("/usr/bin/code")]
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
 def configure_vscode(root: Path) -> None:
     # The step students most often got wrong by hand: the old README walked them
     # through Python: Select Interpreter. Writing it removes the choice.
@@ -401,12 +494,10 @@ def configure_vscode(root: Path) -> None:
 
     # Skipped, not failed, when the `code` CLI is absent: VS Code offers these
     # itself on first opening a notebook, and a missing editor must not fail an
-    # otherwise-good Python environment. On macOS the CLI is not on PATH until
-    # the user runs "Shell Command: Install 'code' command in PATH", so this is
-    # often skipped there.
-    code = shutil.which("code")
+    # otherwise-good Python environment.
+    code = find_code()
     if not code:
-        say("VS Code not found on PATH - install it from https://code.visualstudio.com/,")
+        say("VS Code not found - install it from https://code.visualstudio.com/,")
         say('then add the "Python" and "Jupyter" extensions from the Extensions panel.')
         return
     for extension in ("ms-python.python", "ms-toolsai.jupyter"):
@@ -425,7 +516,16 @@ def register_kernel(root: Path) -> None:
     # (including the macOS symlink re-point) lives in scripts/register_kernel.py,
     # the same script `uv run bme590 start` uses, so there is one implementation.
     if run([venv_python(root), "scripts/register_kernel.py"], cwd=root).returncode != 0:
-        raise InstallError("registering the Jupyter kernel failed")
+        # Deliberately not fatal, for the same reason the VS Code step is not:
+        # the environment is complete and usable without it. The kernelspec is a
+        # convenience file in the user's Jupyter directory, `uv run bme590 start`
+        # re-registers it on every run, and VS Code can select the interpreter
+        # directly (configure_vscode just pointed it at .venv). Failing the whole
+        # install here would send a student with a working setup to Slack.
+        say("could not register the Jupyter kernel - the rest of the environment is fine.")
+        say("`uv run bme590 start 01` tries again every time it runs; if VS Code asks")
+        say('which kernel to use, pick the one under ".venv" in this folder.')
+        return
     ok('kernel "BME 590 (lab automation)" available')
 
 
