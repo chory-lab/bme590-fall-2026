@@ -95,6 +95,18 @@ jobs:
             || .venv/Scripts/python.exe scripts/start_workshop.py 01
           test -f assignments/01_deck_setup.ipynb
 
+      # Regression (macOS venv-symlink bug): doctor.py must still reject an
+      # interpreter outside the class venv. sys._base_executable is exactly the
+      # resolved base path a buggy kernelspec used to point at on macOS. The
+      # positive side (doctor passes under the venv, kernelspec argv[0] points
+      # at the venv) is enforced by the installer's own verify step above.
+      - name: Regression - doctor rejects an interpreter outside the class venv
+        shell: bash
+        run: |
+          set -eux
+          if [ -x .venv/bin/python ]; then VPY=.venv/bin/python; else VPY=.venv/Scripts/python.exe; fi
+          "$VPY" .github/scripts/check_doctor_negative.py
+
       # The notebook executor needs nbclient and a kernel; students only get
       # those if they opt into JupyterLab, so install the group explicitly here.
       - name: Execute the notebooks against the installed environment
