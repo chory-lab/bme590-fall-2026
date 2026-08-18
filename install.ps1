@@ -49,6 +49,40 @@ function Find-Uv {
   return $null
 }
 
+# Find-Uv accepts a uv that is not on PATH (the two known per-user locations), so
+# the install can succeed while every future `uv run` in a new terminal reports
+# "uv is not recognized" -- and re-running this, which the README offers as the
+# fix, would never help. Guarantee the PATH entry ourselves.
+#
+# The registry, not [Environment]::SetEnvironmentVariable: reading the user PATH
+# through that API expands any %USERPROFILE% style entries it contains, and
+# writing the expanded result back would bake them in permanently. Read raw,
+# write back as ExpandString.
+function Add-ToUserPath ($dir) {
+  $onPath = ($env:Path -split ';' | Where-Object { $_ } |
+             ForEach-Object { $_.TrimEnd('\') }) -icontains $dir.TrimEnd('\')
+  if ($onPath) { return }
+  try {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    $raw = $key.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+    $already = ($raw -split ';' | Where-Object { $_ } |
+                ForEach-Object { $_.TrimEnd('\') }) -icontains $dir.TrimEnd('\')
+    if (-not $already) {
+      $new = if ($raw) { "$dir;$raw" } else { $dir }
+      $key.SetValue('Path', $new, [Microsoft.Win32.RegistryValueKind]::ExpandString)
+      Write-Host "  added $dir to your PATH (new terminals will find uv)"
+    }
+    $key.Close()
+  } catch {
+    # A managed machine can forbid this. Not fatal -- the install still works in
+    # this window; say what to do so a new one is not a mystery.
+    Write-Host "  could not update your PATH ($($_.Exception.Message))."
+    Write-Host "  If a new terminal says 'uv is not recognized', add $dir to PATH by hand."
+    return
+  }
+  $env:Path = "$dir;$env:Path"
+}
+
 $uv = Find-Uv
 if (-not $uv) {
   Write-Host '  not found - installing it (per-user, no administrator rights needed)'
@@ -67,6 +101,7 @@ https://github.com/astral-sh/uv/releases, put it on your PATH, and run this agai
   if (-not $uv) { Die 'uv installed but is not on PATH. Close this window, open a new PowerShell, and run the command again.' }
 }
 Write-Host "  OK  uv at $uv" -ForegroundColor Green
+Add-ToUserPath (Split-Path -Parent $uv)
 $env:UV_BIN = $uv
 
 # The installer proper: use the copy beside this script when there is one (a real

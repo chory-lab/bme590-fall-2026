@@ -25,21 +25,70 @@ die() { printf "\n${R}INSTALL FAILED: %s${Z}\n" "$1" >&2; exit 1; }
 # unreliable (it sometimes targets ~/.profile, which zsh never reads), so a fresh
 # Terminal can still report "command not found: uv" even though uv installed
 # fine. Guarantee the path for future shells ourselves, and say what we changed.
-# Only for the default per-user location; if uv lives somewhere else on PATH,
-# whatever put it there already handles this.
+#
+# For whichever directory uv actually lives in, not just the default one:
+# find_uv below deliberately accepts a Homebrew uv at /opt/homebrew/bin, which on
+# Apple silicon is on PATH only if `brew shellenv` runs from the profile -- so
+# "something else put it there, so something else handles PATH" is not a safe
+# assumption, and a student in that state can re-run this forever without it
+# helping.
+#
+# Verified, not inferred. This check used to be `grep -q 'HOME/.local/bin' ~/.zshrc`
+# -- and a real student install passed that grep and still opened a new Terminal
+# to "zsh: command not found: uv". The grep matches uv's own
+# `. "$HOME/.local/bin/env"` line, a comment, a quoted string, or anything after
+# an early `return` in the rc file, none of which put uv on PATH. Asking a login
+# shell whether it can find uv is the actual question, so ask it.
+uv_on_path_for_new_shells() {
+  [ -n "${SHELL-}" ] || return 1
+  # </dev/null so an rc file that reads input cannot hang the installer.
+  "$SHELL" -lic 'command -v uv' >/dev/null 2>&1 </dev/null
+}
+
 ensure_uv_findable() {
-  case "${UV-}" in "$HOME/.local/bin/uv") ;; *) return 0 ;; esac
+  UV_DIR=$(CDPATH= cd -- "$(dirname -- "$UV")" && pwd) || return 0
+  if uv_on_path_for_new_shells; then return 0; fi
   case "${SHELL-}" in
     *zsh*)  RC="$HOME/.zshrc" ;;
-    *bash*) RC="$HOME/.bashrc" ;;
+    *fish*) RC="$HOME/.config/fish/conf.d/uv-path.fish" ;;
+    *bash*)
+      # macOS Terminal starts *login* shells, which read .bash_profile and never
+      # .bashrc -- so writing .bashrc there (what this used to do) changed
+      # nothing for new windows. Creating .bash_profile when it does not exist
+      # would stop bash reading an existing .profile, so prefer what is there.
+      if [ "$(uname -s)" = "Darwin" ]; then
+        if [ -f "$HOME/.bash_profile" ]; then RC="$HOME/.bash_profile"
+        elif [ -f "$HOME/.profile" ]; then RC="$HOME/.profile"
+        else RC="$HOME/.bash_profile"; fi
+      else
+        RC="$HOME/.bashrc"
+      fi ;;
     *)      RC="$HOME/.profile" ;;
   esac
-  if [ -f "$RC" ] && grep -q 'HOME/.local/bin' "$RC"; then
-    return 0
+  UV_DIR_HOME=$(printf '%s' "$UV_DIR" | sed "s|^$HOME|\$HOME|")
+  case "$RC" in
+    *.fish) LINE="fish_add_path $UV_DIR" ;;
+    *)      LINE="export PATH=\"$UV_DIR_HOME:\$PATH\"" ;;
+  esac
+  # The one thing still worth matching on: our own line, so re-running does not
+  # stack up copies of it. Everything else is decided by the check above.
+  if ! { [ -f "$RC" ] && grep -qF "$LINE" "$RC"; }; then
+    mkdir -p "$(dirname "$RC")" 2>/dev/null
+    # >> creates the file if a fresh Mac has no rc file yet; never truncate.
+    printf '\n%s\n' "$LINE" >> "$RC" 2>/dev/null || return 0
   fi
-  # >> creates the file if a fresh Mac has no rc file yet; never truncate.
-  printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$RC" 2>/dev/null || return 0
-  echo "  added uv to PATH in $RC (new terminals will find it)"
+
+  # Confirm the edit did what it was supposed to. If it did not -- an rc file
+  # that returns early, a Terminal configured to run a different shell -- the
+  # student needs the exact command, not the reassuring message.
+  if uv_on_path_for_new_shells; then
+    echo "  added $UV_DIR to PATH in $RC (new terminals will find it)"
+  else
+    echo "  NOTE: added $UV_DIR to $RC, but a fresh $SHELL still does not find uv."
+    echo "  If a new terminal says 'command not found: uv', run this once:"
+    echo "      export PATH=\"$UV_DIR:\$PATH\""
+    echo "  and tell us -- that rc file is doing something we should know about."
+  fi
 }
 
 printf "${C}==> Checking for uv${Z}\n"
