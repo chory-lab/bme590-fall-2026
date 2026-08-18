@@ -57,3 +57,23 @@ jupyterlite/deck.html
 
 # setuptools temp dir left by `pip wheel` (building the kernel wheel).
 build/
+
+# The student environment, built by install.ps1 / install.sh from uv.lock.
+# uv.lock and .python-version ARE committed: they are what makes every student's
+# install identical and reproducible.
+.venv/
+
+# Offline install bundles, built by scripts/build_wheelhouse.py (and by CI, which
+# attaches them to releases). Too large to commit; rebuilt from uv.lock.
+dist/
+.wheelhouse/
+
+# Workshop 4 exercise 4 output, written by running the notebook (or the
+# autograder) -- it is a submission artifact, not repo content.
+data/exercise_4.csv
+
+# The answer key. It lives in a separate PRIVATE repo and is cloned into
+# solutions/ when needed:
+#   git clone https://github.com/stefangolas/bme590-fall-2026-solutions solutions
+# This repo is public, so the directory must never be committed here.
+solutions/

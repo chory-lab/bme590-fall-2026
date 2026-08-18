@@ -1,9 +1,21 @@
 name: Workshops
 
-# Verifies the workshop notebooks work "out of the box" across platforms:
-# the conda env from environment.yaml builds, every pylabrobot import the
+# Verifies that the workshops work "out of the box" across platforms, by two
+# independent routes:
+#
+#   install         — runs the real student installer (install.ps1 / install.sh)
+#                     on a bare runner, exactly as a student would, then executes
+#                     every notebook against the environment it produced. This is
+#                     the supported path, so it is the one that gates merges.
+#   grade           — runs the autograder against the reference solutions (a
+#                     separate private repo) and asserts the untouched stubs
+#                     still score zero. Skipped where SOLUTIONS_TOKEN is absent.
+#   conda-fallback  — the same notebook checks against environment.yaml, which
+#                     the README documents for students already on Conda.
+#
+# Both end in .github/scripts/check_workshops.py: every pylabrobot import the
 # notebooks use resolves, a chatterbox smoke protocol runs, and each notebook
-# executes headless. Run by .github/scripts/check_workshops.py.
+# executes headless.
 
 on:
   push:
@@ -11,12 +23,26 @@ on:
     paths:
       - "workshops/**"
       - "environment.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".python-version"
+      - "install.ps1"
+      - "install.sh"
+      - "scripts/**"
+      - "plr_workshops/**"
       - ".github/scripts/check_workshops.py"
       - ".github/workflows/workshops.yml"
   pull_request:
     paths:
       - "workshops/**"
       - "environment.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".python-version"
+      - "install.ps1"
+      - "install.sh"
+      - "scripts/**"
+      - "plr_workshops/**"
       - ".github/scripts/check_workshops.py"
       - ".github/workflows/workshops.yml"
   workflow_dispatch:
@@ -25,8 +51,128 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    name: workshops (${{ matrix.os }})
+  install:
+    name: installer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # No setup-python, no setup-uv, and deliberately no system libraries: the
+      # claim under test is that a student needs nothing preinstalled. The
+      # installer brings its own uv and its own Python 3.11, and PyLabRobot
+      # guards its libusb/hidapi imports, so nothing here needs apt or brew.
+      #
+      # Running the script from inside the checkout exercises its
+      # already-a-checkout branch; the clone/zip branches need a published repo
+      # and are not covered here (see HANDOFF.md).
+      - name: Run the student installer (posix)
+        if: runner.os != 'Windows'
+        run: sh ./install.sh
+
+      - name: Run the student installer (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./install.ps1
+
+      # Repo hygiene, not environment: committed notebooks must carry no outputs
+      # or execution counts, so that every student's `git pull` stays a clean
+      # fast-forward. A conflict inside a .ipynb usually yields a file that will
+      # not open.
+      - name: Assert the committed workshops carry no execution state
+        shell: bash
+        run: uv run --no-project python scripts/check_notebooks_clean.py
+
+      - name: Assert the installer produced what it claims
+        shell: bash
+        run: |
+          set -eux
+          test -d .venv
+          test -f .vscode/settings.json
+          test -d assignments
+          # start_workshop.py must land the copy in assignments/, since the
+          # notebooks resolve ../figs and ../data relative to it.
+          .venv/bin/python scripts/start_workshop.py 01 2>/dev/null \
+            || .venv/Scripts/python.exe scripts/start_workshop.py 01
+          test -f assignments/01_deck_setup.ipynb
+
+      # The notebook executor needs nbclient and a kernel; students only get
+      # those if they opt into JupyterLab, so install the group explicitly here.
+      - name: Execute the notebooks against the installed environment
+        shell: bash
+        run: |
+          set -eux
+          uv sync --frozen --group notebook
+          uv run --frozen python .github/scripts/check_workshops.py
+
+  grade:
+    name: autograder
+    runs-on: ubuntu-latest
+    # The solutions are the answer key and live in a separate private repo, so
+    # this job needs a token that can read it. Forks (and PRs from them) do not
+    # get repository secrets, and a job that can never pass there is worse than
+    # no job at all -- so skip rather than fail.
+    if: github.repository_owner == 'chory-lab' || github.repository_owner == 'stefangolas'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for the solutions token
+        id: token
+        run: echo "present=${{ secrets.SOLUTIONS_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      # solutions/ is gitignored in this repo on purpose: it is the answer key,
+      # and this repo is public. It is cloned in for the length of the job.
+      - name: Check out the private solutions repo
+        if: steps.token.outputs.present == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: stefangolas/bme590-fall-2026-solutions
+          token: ${{ secrets.SOLUTIONS_TOKEN }}
+          path: solutions
+
+      - name: Say why this job did nothing
+        if: steps.token.outputs.present != 'true'
+        run: |
+          echo "::warning::SOLUTIONS_TOKEN is not set, so the autograder did not run."
+          echo "Add a repo secret with read access to stefangolas/bme590-fall-2026-solutions."
+
+      - name: Run the student installer (posix)
+        if: steps.token.outputs.present == 'true'
+        run: sh ./install.sh
+
+      - name: Install the notebook group
+        if: steps.token.outputs.present == 'true'
+        run: uv sync --frozen --group notebook
+
+      # The solutions are generated from solutions/sources/*.py by patching the
+      # workshop stubs, so a workshop that moves under a solution shows up here
+      # as a diff rather than as a mystery failure in somebody's grading run.
+      - name: Rebuild the solution notebooks from their sources
+        if: steps.token.outputs.present == 'true'
+        run: |
+          set -eux
+          uv run --frozen python scripts/make_solutions.py
+          git -C solutions diff --exit-code
+
+      # A correct submission must score full marks...
+      - name: Grade the solutions
+        if: steps.token.outputs.present == 'true'
+        run: uv run --frozen python scripts/grade.py solutions/
+
+      # ...and an untouched workshop must score nothing. Without this, a check
+      # that has quietly stopped testing anything still looks green above.
+      - name: Negative control -- the stubs must score zero
+        if: steps.token.outputs.present == 'true'
+        run: |
+          set -eu
+          uv run --frozen python scripts/grade.py workshops/ | tee grade-stubs.txt || true
+          grep -q "=== 0/" grade-stubs.txt
+
+  conda-fallback:
+    name: conda fallback (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -38,19 +184,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system libraries (ubuntu)
-        # pylabrobot imports backends that bind libusb and hidapi at import
-        # time. The wheels ship the Python bindings, not the C libraries.
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libusb-1.0-0 libhidapi-hidraw0 libhidapi-libusb0
-
-      - name: Install system libraries (macos)
-        if: runner.os == 'macOS'
-        run: brew install libusb hidapi
-
-      - name: Build the student environment from environment.yaml
+      - name: Build the environment from environment.yaml
         uses: conda-incubator/setup-miniconda@v3
         with:
           miniforge-variant: Miniforge3
