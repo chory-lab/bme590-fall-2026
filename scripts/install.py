@@ -142,11 +142,12 @@ def preflight() -> list[str]:
     if sys.platform.startswith("linux"):
         # A musl system (Alpine and friends) can install these wheels, but the
         # managed CPython uv fetches is glibc-linked and will not run there.
+        # There is no supported workaround, so say so up front.
         libc, _ = platform.libc_ver()
         if not libc and not Path("/lib/x86_64-linux-gnu").exists():
             warnings.append(
-                "this may be a musl-based Linux (Alpine). If the install fails, use the "
-                "Conda path in the README instead."
+                "this may be a musl-based Linux (Alpine). The class environment is "
+                "not supported there; use a glibc Linux, a Mac, or a Windows machine."
             )
 
     # .venv is ~200 MB and uv's package cache another ~300 MB. Running out of

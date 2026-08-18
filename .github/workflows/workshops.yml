@@ -10,8 +10,6 @@ name: Workshops
 #   grade           — runs the autograder against the reference solutions (a
 #                     separate private repo) and asserts the untouched stubs
 #                     still score zero. Skipped where SOLUTIONS_TOKEN is absent.
-#   conda-fallback  — the same notebook checks against environment.yaml, which
-#                     the README documents for students already on Conda.
 #
 # Both end in .github/scripts/check_workshops.py: every pylabrobot import the
 # notebooks use resolves, a chatterbox smoke protocol runs, and each notebook
@@ -22,27 +20,25 @@ on:
     branches: [main]
     paths:
       - "workshops/**"
-      - "environment.yaml"
       - "pyproject.toml"
       - "uv.lock"
       - ".python-version"
       - "install.ps1"
       - "install.sh"
       - "scripts/**"
-      - "plr_workshops/**"
+      - "bme590/**"
       - ".github/scripts/check_workshops.py"
       - ".github/workflows/workshops.yml"
   pull_request:
     paths:
       - "workshops/**"
-      - "environment.yaml"
       - "pyproject.toml"
       - "uv.lock"
       - ".python-version"
       - "install.ps1"
       - "install.sh"
       - "scripts/**"
-      - "plr_workshops/**"
+      - "bme590/**"
       - ".github/scripts/check_workshops.py"
       - ".github/workflows/workshops.yml"
   workflow_dispatch:
@@ -170,29 +166,3 @@ jobs:
           set -eu
           uv run --frozen python scripts/grade.py workshops/ | tee grade-stubs.txt || true
           grep -q "=== 0/" grade-stubs.txt
-
-  conda-fallback:
-    name: conda fallback (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    defaults:
-      run:
-        shell: bash -l {0}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build the environment from environment.yaml
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          miniforge-variant: Miniforge3
-          python-version: "3.11"
-          environment-file: environment.yaml
-          activate-environment: lab-automation
-          auto-update-conda: false
-          use-mamba: true
-
-      - name: Run the workshop checks
-        run: python .github/scripts/check_workshops.py
