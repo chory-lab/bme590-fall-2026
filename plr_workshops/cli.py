@@ -189,7 +189,7 @@ While you work:
     and the top right should read "Connected". If it does not, reload that page.
   - Re-running a Visualizer cell leaves the old one running, and your browser
     stays attached to it -- so the deck appears to freeze. Restart the kernel
-    (or use plr_workshops.workshop.visualizer, which closes the old one).
+    to close the old visualizer.
   - To record a GIF, click Start Recording BEFORE the protocol cell runs.
   - `SLEEP` at the top of the notebook scales every pause; set it to 0 to run
     at full speed once you have watched it.

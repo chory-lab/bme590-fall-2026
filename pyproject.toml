@@ -5,18 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bme590-workshops"
 version = "0.1.0"
-description = "Browser-runnable tooling for the BME 590 PyLabRobot workshops"
+description = "Tooling for the BME 590 PyLabRobot workshops"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-  # The canonical install target is the JupyterLite browser kernel. This is the
-  # whole dependency set it needs: anywidget for the deck bridge, pylabrobot for
-  # the library. numpy/pandas/pillow ship inside Pyodide's own lockfile in the
-  # browser; jupyterlab/sidecar are desktop-only; pylabrobot's [visualizer,
-  # opentrons] extras are hardware backends the browser never uses (the
-  # visualizer module is in the base wheel).
-  "anywidget>=0.9",
   "pylabrobot==0.2.2",
 ]
 
