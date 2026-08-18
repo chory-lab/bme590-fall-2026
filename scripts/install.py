@@ -540,7 +540,10 @@ def next_steps(root: Path) -> str:
   2. Run this command to copy the workshop and open it in VS Code:
        uv run bme590 start 01
      (your copy lands in assignments, where class updates cannot overwrite it)
-  3. If VS Code asks, pick the kernel "BME 590 (lab automation)".
+  3. The notebook's top right should already read "BME 590 (lab automation)".
+     Nothing to pick -- the workshops name that kernel, and step 1 registered it.
+     If it says "Select Kernel" instead, click it and choose
+     "Jupyter Kernel..." -> "BME 590 (lab automation)".
 
 If anything ever looks wrong:  uv run bme590 check
 To update the course materials later, run the installer again.

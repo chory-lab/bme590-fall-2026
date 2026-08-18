@@ -226,7 +226,10 @@ VS Code window."""
     print(
         f"""
 While you work:
-  - Run the cells in order. The kernel is already chosen for you.
+  - Run the cells in order. The kernel is already chosen: the notebook's top
+    right should read "BME 590 (lab automation)". If it reads "Select Kernel",
+    click it and choose "Jupyter Kernel..." then "BME 590 (lab automation)" --
+    the kernels are one level down, under that heading, not in the first list.
   - When a cell starts the Visualizer, your browser opens {VISUALIZER_URL}
     and the top right should read "Connected". If it does not, reload that page.
   - Re-running a Visualizer cell leaves the old one running, and your browser

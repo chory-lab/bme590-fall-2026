@@ -52,6 +52,8 @@ uv run bme590 start 01
 
 This copies workshop 01 into `assignments/`, opens it in VS Code, and selects the kernel. Run `uv run bme590` alone for the full command list.
 
+You should not have to choose a kernel: the workshops name the class kernel and the installer registered it, so the notebook's top right reads **BME 590 (lab automation)** as soon as it opens. If it reads **Select Kernel** instead, click that, choose **Jupyter Kernel…**, then **BME 590 (lab automation)** — the kernels are one level down, under that heading, not in the first list you see. (VS Code also opens this picker by itself the first time you run a cell without a kernel.)
+
 > Work in `assignments/` and keep it **inside the class folder** — the notebooks load figures by relative path.
 
 ## Help
