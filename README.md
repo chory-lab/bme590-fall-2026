@@ -4,7 +4,7 @@ Professor: Emma Chory, Ph.D. · TA: Stefan Golas
 
 ## Install
 
-Install [VS Code](https://code.visualstudio.com/), then run the command for your OS. It installs Python, `pylabrobot`, and all class materials — no admin rights, no Conda, no WSL.
+Install [VS Code](https://code.visualstudio.com/), then run the command for your OS. It installs Python, `pylabrobot`, and all class materials.
 
 **Windows** (PowerShell):
 
