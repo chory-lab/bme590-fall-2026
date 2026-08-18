@@ -4,7 +4,7 @@
     uv run python scripts/grade.py submissions/            # a whole directory
 
 Runs the notebook, then probes what it defined. See
-plr_workshops/grading/rubric.py for what each exercise is checked against.
+bme590/grading/rubric.py for what each exercise is checked against.
 
 Why it works this way:
 
@@ -30,7 +30,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / ".github" / "scripts"))
 
-from plr_workshops.grading.rubric import RUBRIC, points_for, probe_for, score_for  # noqa: E402
+from bme590.grading.rubric import RUBRIC, points_for, probe_for, score_for  # noqa: E402
 
 MARKER = "###GRADE###"
 

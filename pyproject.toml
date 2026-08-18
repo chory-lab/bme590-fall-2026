@@ -17,7 +17,7 @@ dependencies = [
 # because the installers install this project into .venv alongside its
 # dependencies.
 [project.scripts]
-bme590 = "plr_workshops.cli:main"
+bme590 = "bme590.cli:main"
 
 # The student desktop install. `uv sync` installs the project plus this group,
 # so one command produces the environment the workshops run in. Kept as a
@@ -55,10 +55,10 @@ notebook = [
 default-groups = ["class"]
 
 [tool.setuptools]
-packages = ["plr_workshops"]
+packages = ["bme590"]
 
 [tool.setuptools.package-data]
-plr_workshops = ["*.py"]
+bme590 = ["*.py"]
 
 [tool.setuptools.exclude-package-data]
 "*" = []
