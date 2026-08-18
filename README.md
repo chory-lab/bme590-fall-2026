@@ -1,6 +1,6 @@
 # BME 590 – Laboratory Automation (Fall 2026)
 
-Professor: Emma Chory, Ph.D. · TA: Benjamin (Ben) Perry
+Professor: Emma Chory, Ph.D. · TA: Stefan Golas
 
 ## Install
 
@@ -34,4 +34,4 @@ This copies workshop 01 into `assignments/`, opens it in VS Code, and selects th
 
 ## Help
 
-If something's broken: run `uv run python scripts/doctor.py` and paste the **entire** output into `#ed-discuss` on Slack, or email Ben (benjamin dot perry at duke dot edu).
+If something's broken: run `uv run python scripts/doctor.py` and paste the **entire** output into `#ed-discuss` on Slack, or email Stefan (stefan dot golas at duke dot edu).
