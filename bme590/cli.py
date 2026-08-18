@@ -141,7 +141,9 @@ def cmd_start(args: argparse.Namespace) -> int:
     if not args.workshop:
         return run([python(), "scripts/start_workshop.py"])
 
-    sync_if_needed()
+    # No sync_if_needed() here: `uv run bme590` has already synced the
+    # environment before this command ran. Syncing again just re-audits the same
+    # lock (cmd_update pulls first, so it is the command that actually needs it).
     repair_kernel()
     if run([python(), "scripts/start_workshop.py", args.workshop]) not in (0, 1):
         return 1
