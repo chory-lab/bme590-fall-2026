@@ -44,9 +44,17 @@ def load_checker():
     return module
 
 
-def report_environment() -> list[str]:
-    """Print what a support request needs, and return any hard problems."""
+def report_environment() -> tuple[list[str], list[str]]:
+    """Print what a support request needs, and sort what is wrong into two lists.
+
+    Returns (problems, warnings). A problem means the environment cannot run the
+    workshops; a warning means something is worth fixing but the environment
+    still works. The line matters because scripts/install.py runs this as its
+    last step and fails the install on a non-zero exit -- so anything in the
+    first list tells a student their install failed, and it had better be true.
+    """
     problems: list[str] = []
+    warnings: list[str] = []
     venv = ROOT / ".venv"
     # Which environment is this? Not sys.executable: on macOS a uv venv's
     # bin/python is a symlink to the interpreter uv manages, and sys.executable
@@ -59,17 +67,49 @@ def report_environment() -> list[str]:
     print(f"platform     {platform.platform()}")
     print(f"project      {ROOT}")
 
+    # Where the packages actually come from -- the question sys.prefix is only a
+    # proxy for, and the one that decides whether a notebook works.
+    #
+    # A real student install failed here on a healthy environment: running
+    # .venv/bin/python on macOS with conda active, sys.executable was the venv's
+    # python but sys.prefix was the base interpreter uv manages, because CPython
+    # computed the prefix from the resolved symlink and never saw pyvenv.cfg. The
+    # install was fine; the check was not. So when the prefix looks wrong, ask
+    # where an actual class package loads from before calling it a failure.
+    def loads_from_venv(name: str) -> bool | None:
+        """True/False if `name` resolves in/outside .venv; None if not installed."""
+        try:
+            spec = importlib.util.find_spec(name)
+        except Exception:  # noqa: BLE001 - a broken parent package, i.e. not ours
+            return None
+        if spec is None or not spec.origin:
+            return None
+        try:
+            Path(spec.origin).resolve().relative_to(venv.resolve())
+            return True
+        except (ValueError, OSError):
+            return False
+
     try:
         running.relative_to(venv.resolve())
     except (ValueError, OSError):
-        # On a student machine this is the single most common cause of
-        # "ModuleNotFoundError: pylabrobot" in a notebook that looked installed.
-        problems.append(
-            f"this is not the project environment.\n"
-            f"    expected an interpreter inside {venv}\n"
-            f"    got                            {sys.prefix} (python {sys.executable})\n"
-            f"    Run the command as: uv run python scripts/doctor.py"
-        )
+        if loads_from_venv("pylabrobot"):
+            # Odd, but harmless and out of our hands: the packages being imported
+            # are this folder's, which is what has to be true.
+            warnings.append(
+                f"sys.prefix reports {sys.prefix},\n"
+                f"    not {venv} -- but the class packages are loading from .venv,\n"
+                f"    so this IS the class environment and the checks below are the real test."
+            )
+        else:
+            # The single most common cause of "ModuleNotFoundError: pylabrobot"
+            # in a notebook that looked installed.
+            problems.append(
+                f"this is not the project environment.\n"
+                f"    expected an interpreter inside {venv}\n"
+                f"    got                            {sys.prefix} (python {sys.executable})\n"
+                f"    Run the command as: uv run python scripts/doctor.py"
+            )
 
     if sys.version_info < (3, 11):
         problems.append(f"Python 3.11 or newer is required; this is {platform.python_version()}")
@@ -85,7 +125,9 @@ def report_environment() -> list[str]:
     try:
         from jupyter_client.kernelspec import KernelSpecManager
 
-        argv = KernelSpecManager().get_kernel_spec("bme590").argv
+        manager = KernelSpecManager()
+        spec_dir = manager.find_kernel_specs().get("bme590", "(unknown location)")
+        argv = manager.get_kernel_spec("bme590").argv
         # Compare paths unresolved: on macOS the venv's bin/python is a symlink
         # to the interpreter uv manages, and resolving both sides would also
         # match a kernel registered by a *different* checkout built on the same
@@ -94,13 +136,24 @@ def report_environment() -> list[str]:
         expected = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         target = Path(argv[0]) if argv else None
         if target is None or target != expected:
-            problems.append(
-                f"the 'BME 590' Jupyter kernel points at {target}, not this folder's .venv.\n"
-                f"    Another copy of the course folder probably registered it. Fix with:\n"
-                f"    uv run bme590 start"
+            # State what was found, not why. The old wording asserted "another
+            # copy of the course folder probably registered it", which was simply
+            # wrong in the one real report we have -- it was the macOS
+            # venv-symlink path, from this folder. A guessed cause sends whoever
+            # reads the transcript looking for a folder that does not exist.
+            warnings.append(
+                f"the 'BME 590' Jupyter kernel runs the wrong interpreter.\n"
+                f"    kernel at {spec_dir}\n"
+                f"    runs      {target}\n"
+                f"    expected  {expected}\n"
+                f"    Fix with: uv run bme590 start"
             )
     except Exception:  # noqa: BLE001 - no such kernel, or jupyter_client absent
-        problems.append(
+        # A warning, not a problem: the kernelspec is a convenience file, `uv run
+        # bme590 start` re-registers it, and VS Code can run notebooks against
+        # .venv by interpreter alone. The packages below are what actually decide
+        # whether this environment works.
+        warnings.append(
             "the 'BME 590' Jupyter kernel is not registered. Fix with: uv run bme590 start"
         )
 
@@ -111,12 +164,18 @@ def report_environment() -> list[str]:
     # a stale entry silently shadows a real package (verified: a numpy.py on
     # PYTHONPATH wins over the installed numpy). Rare, but it produces
     # bewildering errors, so name it here rather than let someone hunt for it.
+    #
+    # A warning rather than a problem: plenty of people set PYTHONPATH for
+    # unrelated work and never collide with anything here, and the import check
+    # below is what proves whether it actually broke this environment. Failing
+    # the install on the mere presence of the variable told students with a
+    # perfectly good setup that it had failed.
     for variable in ("PYTHONPATH", "PYTHONHOME"):
         value = os.environ.get(variable)
         if value:
-            problems.append(
-                f"{variable} is set to {value!r}. It overrides this environment's packages -- "
-                f"unset it and try again."
+            warnings.append(
+                f"{variable} is set to {value!r}. It takes priority over this environment's "
+                f"packages -- if a package ever fails to import, unset it and try again."
             )
 
     # Not a problem, just the single most common source of confusion: a conda base
@@ -126,12 +185,12 @@ def report_environment() -> list[str]:
         print(f"note         conda environment '{os.environ['CONDA_DEFAULT_ENV']}' is active in this shell;")
         print("             use `uv run python ...` so you get the class environment")
 
-    return problems
+    return problems, warnings
 
 
 def main() -> int:
     print("=== BME 590 install check ===")
-    problems = report_environment()
+    problems, warnings = report_environment()
 
     if not problems:
         try:
@@ -156,6 +215,11 @@ def main() -> int:
             traceback.print_exc()
             problems.append(f"{type(exc).__name__}: {exc}")
 
+    if warnings:
+        print("\n=== WORTH FIXING (the environment still works) ===")
+        for w in warnings:
+            print(f"  - {w}")
+
     if problems:
         print("\n=== PROBLEMS FOUND ===")
         for p in problems:
@@ -166,7 +230,10 @@ def main() -> int:
         )
         return 1
 
-    print("\nAll checks passed. The environment is ready.")
+    if warnings:
+        print("\nEverything needed to run the workshops is in place (see above for the rest).")
+    else:
+        print("\nAll checks passed. The environment is ready.")
     return 0
 
 
