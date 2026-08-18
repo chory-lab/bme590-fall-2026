@@ -421,13 +421,10 @@ def configure_vscode(root: Path) -> None:
 # ----------------------------------------------------------------------- main
 def register_kernel(root: Path) -> None:
     # A registered kernel means a notebook opened from anywhere -- JupyterLab, or
-    # a copy outside the folder -- can still find this environment.
-    result = run(
-        [venv_python(root), "-m", "ipykernel", "install", "--user", "--name", "bme590",
-         "--display-name", "BME 590 (lab automation)"],
-        cwd=root, stdout=subprocess.DEVNULL,
-    )
-    if result.returncode != 0:
+    # a copy outside the folder -- can still find this environment. The logic
+    # (including the macOS symlink re-point) lives in scripts/register_kernel.py,
+    # the same script `uv run bme590 start` uses, so there is one implementation.
+    if run([venv_python(root), "scripts/register_kernel.py"], cwd=root).returncode != 0:
         raise InstallError("registering the Jupyter kernel failed")
     ok('kernel "BME 590 (lab automation)" available')
 

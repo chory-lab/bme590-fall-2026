@@ -97,10 +97,13 @@ def kernel_is_ours() -> bool:
     argv = spec.argv or []
     if not argv:
         return False
-    try:
-        return Path(argv[0]).resolve().is_relative_to((ROOT / ".venv").resolve())
-    except (OSError, ValueError):
-        return False
+    # Compare paths unresolved. On macOS the venv's bin/python is a symlink to
+    # the interpreter uv manages, so resolving both sides would also match a
+    # kernel registered by a *different* checkout built on the same interpreter.
+    # Registration always writes this checkout's venv path (register_kernel.py),
+    # so the stored argv[0] must equal it, exactly.
+    expected = ROOT / ".venv" / ("Scripts/python.exe" if WINDOWS else "bin/python")
+    return Path(argv[0]) == expected
 
 
 def repair_kernel() -> None:
@@ -108,8 +111,7 @@ def repair_kernel() -> None:
     if kernel_is_ours():
         return
     print("registering this folder's Jupyter kernel...")
-    run([python(), "-m", "ipykernel", "install", "--user", "--name", "bme590",
-         "--display-name", "BME 590 (lab automation)"], stdout=subprocess.DEVNULL)
+    run([python(), "scripts/register_kernel.py"], stdout=subprocess.DEVNULL)
 
 
 def busy_ports() -> list[int]:

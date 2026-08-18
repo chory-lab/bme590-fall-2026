@@ -48,7 +48,12 @@ def report_environment() -> list[str]:
     """Print what a support request needs, and return any hard problems."""
     problems: list[str] = []
     venv = ROOT / ".venv"
-    running = Path(sys.executable).resolve()
+    # Which environment is this? Not sys.executable: on macOS a uv venv's
+    # bin/python is a symlink to the interpreter uv manages, and sys.executable
+    # reports that resolved target even though the venv is active. sys.prefix is
+    # set from pyvenv.cfg and points at the venv whenever the process started
+    # from a venv interpreter, which is exactly the claim being checked.
+    running = Path(sys.prefix).resolve()
 
     print(f"python       {platform.python_version()}  ({sys.executable})")
     print(f"platform     {platform.platform()}")
@@ -57,13 +62,12 @@ def report_environment() -> list[str]:
     try:
         running.relative_to(venv.resolve())
     except (ValueError, OSError):
-        # Not fatal in CI (which runs the checker against its own interpreter),
-        # but on a student machine it is the single most common cause of
+        # On a student machine this is the single most common cause of
         # "ModuleNotFoundError: pylabrobot" in a notebook that looked installed.
         problems.append(
             f"this is not the project environment.\n"
             f"    expected an interpreter inside {venv}\n"
-            f"    got                            {running}\n"
+            f"    got                            {sys.prefix} (python {sys.executable})\n"
             f"    Run the command as: uv run python scripts/doctor.py"
         )
 
@@ -82,8 +86,14 @@ def report_environment() -> list[str]:
         from jupyter_client.kernelspec import KernelSpecManager
 
         argv = KernelSpecManager().get_kernel_spec("bme590").argv
-        target = Path(argv[0]).resolve() if argv else None
-        if target is None or not target.is_relative_to(venv.resolve()):
+        # Compare paths unresolved: on macOS the venv's bin/python is a symlink
+        # to the interpreter uv manages, and resolving both sides would also
+        # match a kernel registered by a *different* checkout built on the same
+        # interpreter. Registration always writes this checkout's venv path, so
+        # the stored argv[0] must equal it exactly.
+        expected = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        target = Path(argv[0]) if argv else None
+        if target is None or target != expected:
             problems.append(
                 f"the 'BME 590' Jupyter kernel points at {target}, not this folder's .venv.\n"
                 f"    Another copy of the course folder probably registered it. Fix with:\n"
