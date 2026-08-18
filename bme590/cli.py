@@ -118,20 +118,52 @@ def sync_if_needed() -> None:
     run([tool, "sync", "--frozen", "--quiet"])
 
 
-def kernel_is_ours() -> bool:
-    """True if the registered `bme590` kernel points at *this* checkout's .venv.
+def _kernel_files() -> list[Path]:
+    """Every kernel.json that register_kernel.py writes and that exists now."""
+    files = [ROOT / ".venv/share/jupyter/kernels/bme590/kernel.json"]
+    try:
+        from jupyter_core.paths import jupyter_data_dir
 
-    The kernelspec is a single user-level file holding an absolute path, so a
-    second checkout (or a moved folder) leaves it aimed somewhere else. A
-    notebook run against the wrong environment fails in ways that look like
-    broken packages, so this is worth checking rather than assuming.
+        files.append(Path(jupyter_data_dir()) / "kernels/bme590/kernel.json")
+    except Exception:  # noqa: BLE001 - jupyter_core absent; the in-venv one still counts
+        pass
+    return [f for f in files if f.exists()]
+
+
+def kernel_is_ours() -> bool:
+    """True if the `bme590` kernel this environment resolves points at our .venv.
+
+    A kernelspec holds an absolute path, so a second checkout (or a moved folder)
+    can leave one aimed somewhere else. A notebook run against the wrong
+    environment fails in ways that look like broken packages, so this is worth
+    checking rather than assuming.
+
+    "Resolves" is the operative word: register_kernel.py installs the spec both
+    inside .venv and at user level, and .venv/share/jupyter/kernels comes first in
+    Jupyter's search path, so this asks the same question a notebook launched from
+    this environment would.
     """
+    import json
+
+    expected_python = ROOT / ".venv" / ("Scripts/python.exe" if WINDOWS else "bin/python")
     try:
         from jupyter_client.kernelspec import KernelSpecManager
 
         spec = KernelSpecManager().get_kernel_spec("bme590")
     except Exception:  # noqa: BLE001 - not installed, or no such kernel
         return False
+
+    # Every copy, not just the winning one. The in-venv spec shadows the
+    # user-level spec here, so a stale global copy is invisible to the check
+    # above -- and that stale copy is precisely what a JupyterLab started outside
+    # this folder would launch, which is the reason we register one at all.
+    for path in _kernel_files():
+        try:
+            if Path(json.loads(path.read_text(encoding="utf-8"))["argv"][0]) != expected_python:
+                return False
+        except (OSError, ValueError, KeyError, IndexError):
+            return False
+
     argv = spec.argv or []
     if not argv:
         return False
@@ -255,6 +287,7 @@ def cmd_lab(args: argparse.Namespace) -> int:
     print("making sure JupyterLab is installed...")
     if run([tool, "sync", "--frozen", "--group", "notebook"]) != 0:
         return 1
+    repair_kernel()
     (ROOT / "assignments").mkdir(exist_ok=True)
     return run([tool, "run", "--frozen", "--group", "notebook", "jupyter", "lab",
                 "--notebook-dir", str(ROOT)])
@@ -282,6 +315,11 @@ def cmd_update(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
+    # Repair before reporting. The kernel is the one thing doctor used to only
+    # complain about, and re-registering it is idempotent and takes about a
+    # second -- so a student who runs the command the error message told them to
+    # run gets it fixed rather than told about it twice.
+    repair_kernel()
     return run([python(), "scripts/doctor.py"])
 
 
