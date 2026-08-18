@@ -2,7 +2,6 @@
 #
 #   irm https://raw.githubusercontent.com/chory-lab/bme590-fall-2026/main/install.ps1 | iex
 #
-# or double-click Install-Windows.cmd inside a copy of the repo.
 #
 # This script does one thing: get a Python. Everything else -- fetching the
 # course files, building the environment, configuring VS Code, verifying it --

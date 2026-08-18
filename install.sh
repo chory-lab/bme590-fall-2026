@@ -3,8 +3,6 @@
 #
 #   curl -LsSf https://raw.githubusercontent.com/chory-lab/bme590-fall-2026/main/install.sh | sh
 #
-# or double-click Install-macOS.command inside a copy of the repo.
-#
 # This script does one thing: get a Python. Everything else -- fetching the
 # course files, building the environment, configuring VS Code, verifying it --
 # lives in scripts/install.py, which this hands off to. Keeping the shell layer
