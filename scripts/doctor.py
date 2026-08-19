@@ -225,7 +225,7 @@ def main() -> int:
         for p in problems:
             print(f"  - {p}")
         print(
-            "\nCopy this whole report into the #pylabrobot Slack channel.\n"
+            "\nCopy this whole report into #ed-discuss on Slack.\n"
             "Most problems are fixed by re-running the installer."
         )
         return 1

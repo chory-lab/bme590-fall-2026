@@ -21,6 +21,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -96,6 +97,32 @@ def which_uv() -> str:
     )
 
 
+# uv.lock is written at revision 3, which uv learned to read in 0.8. The
+# bootstraps accept any uv already on the machine -- Homebrew's, apt's, a pipx
+# one from last year -- so an old one is reachable, and what it produces is an
+# unsupported-lockfile error that names a schema and not the fix.
+UV_MINIMUM = (0, 8)
+
+
+def check_uv_version(uv: str) -> None:
+    try:
+        result = run([uv, "--version"], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return  # cannot ask: let the real command produce the real error
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", result.stdout or "")
+    if not match:
+        return
+    version = (int(match.group(1)), int(match.group(2)))
+    if version < UV_MINIMUM:
+        printable = ".".join(match.groups())
+        raise InstallError(
+            f"the uv on this machine is {printable}, and this class needs "
+            f"{UV_MINIMUM[0]}.{UV_MINIMUM[1]} or newer to read uv.lock.\n"
+            f"    Update it with:  uv self update\n"
+            f"    (installed with Homebrew? use `brew upgrade uv` instead), then run this again."
+        )
+
+
 # ------------------------------------------------------------------- preflight
 # Every package in uv.lock has a prebuilt wheel for Windows x86_64/arm64, macOS
 # x86_64/arm64 and Linux x86_64/arm64 -- verified by resolving the exported lock
@@ -111,7 +138,7 @@ def which_uv() -> str:
 MACOS_MINIMUM = (10, 15)
 
 
-def preflight() -> list[str]:
+def preflight(root: Path | None = None) -> list[str]:
     """Refuse platforms where the install cannot work; warn where it may not.
 
     Returns advisory warnings. Raises InstallError for a hard stop.
@@ -154,7 +181,7 @@ def preflight() -> list[str]:
     # space mid-install leaves exactly the half-written .venv that the rebuild
     # step below has to clean up, so say so before starting.
     try:
-        free_gb = shutil.disk_usage(Path.home()).free / 1e9
+        free_gb = shutil.disk_usage(root or Path.home()).free / 1e9
         if free_gb < 1.5:
             raise InstallError(
                 f"only {free_gb:.1f} GB free on this disk. The environment needs about 0.5 GB, "
@@ -484,12 +511,26 @@ def configure_vscode(root: Path) -> None:
     settings_dir = root / ".vscode"
     settings_dir.mkdir(exist_ok=True)
     interpreter = "${workspaceFolder}\\.venv\\Scripts\\python.exe" if WINDOWS else "${workspaceFolder}/.venv/bin/python"
-    settings = {
+
+    # Merge, do not replace. Re-running the installer is the advertised fix for
+    # everything, and it should not be the thing that silently deletes a font
+    # size or a formatter someone set for this folder. Our three keys win;
+    # anything else is left alone.
+    settings_file = settings_dir / "settings.json"
+    settings: dict = {}
+    if settings_file.exists():
+        try:
+            existing = json.loads(settings_file.read_text(encoding="utf-8"))
+            if isinstance(existing, dict):
+                settings = existing
+        except (OSError, ValueError):
+            say("the existing .vscode/settings.json is not readable JSON - replacing it")
+    settings.update({
         "python.defaultInterpreterPath": interpreter,
         "python.terminal.activateEnvironment": True,
         "jupyter.kernels.filter": [],
-    }
-    (settings_dir / "settings.json").write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    })
+    settings_file.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
     ok(".vscode/settings.json written")
 
     # Skipped, not failed, when the `code` CLI is absent: VS Code offers these
@@ -531,12 +572,16 @@ def register_kernel(root: Path) -> None:
 
 def next_steps(root: Path) -> str:
     shell = "PowerShell" if WINDOWS else "Terminal"
+    # Quote a path with a space in it. "cd C:\Users\Jane Smith\bme590-fall-2026"
+    # is not a command anyone can paste, and the student whose account is named
+    # that way is exactly the one who cannot work around it.
+    location = f'"{root}"' if " " in str(root) else str(root)
     return f"""
 =================================================
  Done. Next steps:
 =================================================
   1. Open a new {shell} window, then run this command to go to the class folder:
-       cd {root}
+       cd {location}
   2. Run this command to copy the workshop and open it in VS Code:
        uv run bme590 start 01
      (your copy lands in assignments, where class updates cannot overwrite it)
@@ -565,7 +610,8 @@ def main(argv: list[str]) -> int:
     try:
         # The bootstrap already reported which uv it found; no need to repeat it.
         uv = which_uv()
-        for warning in preflight():
+        check_uv_version(uv)
+        for warning in preflight(args.root):
             say(f"note: {warning}")
 
         step("Locating the course files")
@@ -590,7 +636,7 @@ def main(argv: list[str]) -> int:
     except InstallError as exc:
         print(_c("31", f"\nINSTALL FAILED: {exc}"))
         print(
-            "\nCopy everything above this line into the #pylabrobot Slack channel, along with:\n"
+            "\nCopy everything above this line into #ed-discuss on Slack, along with:\n"
             f"  - your operating system ({platform.platform()})\n"
             "  - what you had already installed before running this\n\n"
             "That transcript is enough for us to fix it; a screenshot of one line usually is not."

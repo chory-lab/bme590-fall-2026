@@ -58,6 +58,6 @@ You should not have to choose a kernel: the workshops name the class kernel and 
 
 ## Help
 
-If something's broken: run `uv run python scripts/doctor.py` and paste the **entire** output into `#ed-discuss` on Slack, or email Stefan (stefan dot golas at duke dot edu).
+If something's broken: run `uv run bme590 check` and paste the **entire** output into `#ed-discuss` on Slack, or email Stefan (stefan dot golas at duke dot edu).
 
-If a new terminal says `command not found: uv` (macOS / Linux) or `uv is not recognized` (Windows), just re-run the install command above — it makes new terminals find uv (by adding `~/.local/bin` to your shell's PATH on macOS / Linux).
+If a new terminal says `command not found: uv` (macOS / Linux) or `uv is not recognized` (Windows), just re-run the install command above — it puts uv on the PATH that new terminals use, on every platform, and tells you which file it changed.

@@ -104,6 +104,12 @@ def find_code() -> str | None:
     return None
 
 
+def jupyterlab_installed() -> bool:
+    """Whether the optional `notebook` group is present in this .venv."""
+    launcher = ROOT / ".venv" / ("Scripts/jupyter-lab.exe" if WINDOWS else "bin/jupyter-lab")
+    return launcher.exists()
+
+
 def sync_if_needed() -> None:
     """Bring the environment in line with uv.lock.
 
@@ -115,7 +121,12 @@ def sync_if_needed() -> None:
     if not tool:
         print("note: uv is not on PATH, so the environment cannot be checked - skipping")
         return
-    run([tool, "sync", "--frozen", "--quiet"])
+    # Keep JupyterLab if this student has it. `uv sync` installs exactly the
+    # default groups and prunes the rest, so a plain sync uninstalls the largest
+    # download in the tree from under anyone who works in `bme590 lab` -- every
+    # `bme590 update`, silently, to be re-downloaded next time they use it.
+    groups = ["--group", "notebook"] if jupyterlab_installed() else []
+    run([tool, "sync", "--frozen", "--quiet", *groups])
 
 
 def _kernel_files() -> list[Path]:

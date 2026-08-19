@@ -25,9 +25,45 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WORKSHOPS = ROOT / "workshops"
 
+# What every workshop must claim, so VS Code binds the class kernel on open
+# without asking. The name is the match key; the version is what stops a
+# notebook executed under some other interpreter from advertising it.
+KERNEL_NAME = "bme590"
+DISPLAY_NAME = "BME 590 (lab automation)"
+CLASS_PYTHON = (ROOT / ".python-version").read_text(encoding="utf-8").strip()
+
+
+def metadata_offenders(notebook: dict) -> list[str]:
+    """Kernel metadata that would stop a notebook binding to the class kernel."""
+    found = []
+    metadata = notebook.get("metadata", {})
+    kernelspec = metadata.get("kernelspec", {})
+    if kernelspec.get("name") != KERNEL_NAME:
+        found.append(f"kernelspec.name={kernelspec.get('name')!r}, expected {KERNEL_NAME!r}")
+    if kernelspec.get("display_name") != DISPLAY_NAME:
+        found.append(f"kernelspec.display_name={kernelspec.get('display_name')!r}")
+    version = metadata.get("language_info", {}).get("version")
+    # Compare the minor series only: the patch level tracks whoever ran it last,
+    # and nothing matches on it.
+    if version and ".".join(str(version).split(".")[:2]) != CLASS_PYTHON:
+        found.append(f"language_info.version={version!r}, expected {CLASS_PYTHON}.x")
+    return found
+
+
+def normalize_metadata(notebook: dict) -> None:
+    metadata = notebook.setdefault("metadata", {})
+    metadata["kernelspec"] = {
+        "display_name": DISPLAY_NAME,
+        "language": "python",
+        "name": KERNEL_NAME,
+    }
+    language_info = metadata.setdefault("language_info", {})
+    language_info["name"] = "python"
+    language_info["version"] = CLASS_PYTHON
+
 
 def offenders(notebook: dict) -> list[str]:
-    found = []
+    found = metadata_offenders(notebook)
     for index, cell in enumerate(notebook.get("cells", [])):
         if cell.get("cell_type") != "code":
             continue
@@ -39,6 +75,7 @@ def offenders(notebook: dict) -> list[str]:
 
 
 def strip(notebook: dict) -> None:
+    normalize_metadata(notebook)
     for cell in notebook.get("cells", []):
         if cell.get("cell_type") == "code":
             cell["outputs"] = []
@@ -63,7 +100,7 @@ def main(argv: list[str]) -> int:
             with path.open("w", encoding="utf-8", newline="\n") as fh:
                 json.dump(notebook, fh, indent=1, ensure_ascii=False)
                 fh.write("\n")
-            print(f"stripped {path.relative_to(ROOT)} ({len(problems)} field(s))")
+            print(f"fixed {path.relative_to(ROOT)} ({len(problems)} field(s))")
         else:
             failures += 1
             print(f"NOT CLEAN: {path.relative_to(ROOT)}")
@@ -74,12 +111,15 @@ def main(argv: list[str]) -> int:
 
     if failures:
         print(
-            f"\n{failures} workshop(s) carry execution state. Run:\n"
+            f"\n{failures} workshop(s) carry execution state or the wrong kernel metadata. Run:\n"
             "    uv run python scripts/check_notebooks_clean.py --fix\n"
             "and commit the result, so that every student's `git pull` stays a clean fast-forward."
         )
         return 1
-    print(f"all {len(list(WORKSHOPS.glob('*.ipynb')))} workshops are free of outputs and execution counts")
+    print(
+        f"all {len(list(WORKSHOPS.glob('*.ipynb')))} workshops are free of outputs and execution "
+        f"counts, and name the {KERNEL_NAME} kernel on python {CLASS_PYTHON}"
+    )
     return 0
 
 
