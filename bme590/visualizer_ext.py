@@ -39,6 +39,7 @@ import time
 import webbrowser
 from contextlib import asynccontextmanager
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from urllib.parse import urlsplit, parse_qs
 
 from pylabrobot.liquid_handling import LiquidHandler
 from pylabrobot.resources import Deck
@@ -127,17 +128,65 @@ _RECORDER_JS = """
 </script>
 """
 
+# Hides everything that is not the deck: the left toolbar (aside), the right
+# side panel and its resize handle, and the reset-view button. Applied when
+# RecordingVisualizer is built with declutter=True, or per-page-load with
+# ?minimal=1 in the URL.
+_DECLUTTER_CSS = """
+<style id="class-declutter-style">
+  body.class-minimal aside,
+  body.class-minimal #sidepanel,
+  body.class-minimal #sidepanel-resize-handle,
+  body.class-minimal #home-button {
+    display: none !important;
+  }
+  body.class-minimal main {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+  }
+</style>
+<script>
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  var byUrl = params.has("minimal") || params.has("clean") || params.has("deck-only");
+  // window.__CLASS_DECLUTTER_KWARG is set by the server-injected flag script
+  // when RecordingVisualizer was built with declutter=True.
+  if (byUrl || window.__CLASS_DECLUTTER_KWARG) {
+    document.body.classList.add("class-minimal");
+    window.addEventListener("load", function () { window.dispatchEvent(new Event("resize")); });
+  }
+})();
+</script>
+"""
+
 
 class RecordingVisualizer(Visualizer):
     """A :class:`Visualizer` whose served page accepts ``class_start_gif`` /
     ``class_stop_gif`` websocket commands, enabling code-driven recording via
-    :func:`gif_recorder`."""
+    :func:`gif_recorder`.
+
+    With ``declutter=True`` the page shows only the deck: toolbar, side panel,
+    and reset button are hidden and machine-tool popups stay closed. Any page
+    of a RecordingVisualizer can also be toggled per-load with ``?minimal=1``
+    (or ``?clean=1``, ``?deck-only=1``) in its URL.
+    """
+
+    def __init__(self, resource, declutter: bool = False, **kwargs):
+        if declutter:
+            # Machine-tool popups are part of the clutter; keep them closed
+            # unless explicitly requested.
+            kwargs.setdefault("show_machine_tools_at_start", False)
+        self._declutter = declutter
+        super().__init__(resource, **kwargs)
 
     def _run_file_server(self):
         """Copy of ``Visualizer._run_file_server`` that additionally injects
         the recorder script into index.html. Anchored on ``</body>``, which is
         stable across PLR releases; re-check this override when upgrading."""
         path = os.path.join(os.path.dirname(_plr_visualizer_module.__file__), ".")
+        server = self  # the Visualizer instance, for the handler closure below
 
         def start_server(lock):
             ws_port, fs_port, source_filename = self.ws_port, self.fs_port, self._source_filename
@@ -158,7 +207,8 @@ class RecordingVisualizer(Visualizer):
                     super().end_headers()
 
                 def do_GET(self) -> None:
-                    if self.path == "/":
+                    parts = urlsplit(self.path)
+                    if parts.path == "/":
                         with open(os.path.join(path, "index.html"), "r", encoding="utf-8") as f:
                             content = f.read()
 
@@ -166,8 +216,26 @@ class RecordingVisualizer(Visualizer):
                         content = content.replace("{{ fs_port }}", str(fs_port))
                         content = content.replace("{{ source_filename }}", source_filename)
                         content = content.replace("{{ liquid_color }}", liquid_color)
+
                         # Inject the code-driven recorder (the one change vs stock).
-                        content = content.replace("</body>", _RECORDER_JS + "\n  </body>")
+                        extras = [_RECORDER_JS]
+                        # Declutter: kwarg applies always; ?minimal=1 (or
+                        # ?clean=1, ?deck-only=1) toggles it per page load.
+                        minimal_kwarg = getattr(server, "_declutter", False)
+                        minimal_query = any(
+                            q in parse_qs(parts.query) for q in ("minimal", "clean", "deck-only")
+                        )
+                        if minimal_kwarg:
+                            # The flag must precede _DECLUTTER_CSS: its script
+                            # reads window.__CLASS_DECLUTTER_KWARG at parse time.
+                            extras.append(
+                                "<script>window.__CLASS_DECLUTTER_KWARG = true;</script>"
+                            )
+                        if minimal_kwarg or minimal_query:
+                            extras.append(_DECLUTTER_CSS)
+                        content = content.replace(
+                            "</body>", "".join(extras) + "\n  </body>"
+                        )
 
                         self.send_response(200)
                         self.send_header("Content-type", "text/html")
@@ -379,6 +447,7 @@ async def visualize_deck(
     deck: Deck,
     backend,
     open_browser: bool = True,
+    declutter: bool = False,
     **vis_kwargs,
 ) -> LiquidHandler:
     """Build a LiquidHandler + RecordingVisualizer pair.
@@ -389,6 +458,10 @@ async def visualize_deck(
     which swallowed exceptions (returning ``None`` on failure) and discarded
     the visualizer reference.
 
+    ``declutter=True`` serves a deck-only page: toolbar, side panel, reset
+    button, and machine-tool popups are hidden. Also available per-load via
+    ``?minimal=1`` in the page URL.
+
     Set the environment variable ``BME590_HEADLESS=1`` to skip the visualizer
     entirely (used by headless CI).
     """
@@ -397,7 +470,9 @@ async def visualize_deck(
         await lh.setup()
         lh.vis = None  # type: ignore[attr-defined]
         return lh
-    vis = RecordingVisualizer(resource=lh, open_browser=open_browser, **vis_kwargs)
+    vis = RecordingVisualizer(
+        resource=lh, open_browser=open_browser, declutter=declutter, **vis_kwargs
+    )
     await lh.setup()
     await vis.setup()
     lh.vis = vis  # type: ignore[attr-defined]
