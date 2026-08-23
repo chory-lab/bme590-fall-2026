@@ -529,6 +529,10 @@ def configure_vscode(root: Path) -> None:
         "python.defaultInterpreterPath": interpreter,
         "python.terminal.activateEnvironment": True,
         "jupyter.kernels.filter": [],
+        # Trust the kernelspec baked into each notebook (name: bme590)
+        # instead of prompting students to pick one -- the prompt is where
+        # wrong-environment selections happen.
+        "jupyter.askForKernelSelection": False,
     })
     settings_file.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
     ok(".vscode/settings.json written")

@@ -178,6 +178,33 @@ def neutralize(src):
     # Zero the constant wherever the notebook sets it, rather than rewriting the
     # 32 call sites that use it.
     src = re.sub(r"^SLEEP\s*=\s*[0-9.]+\s*$", "SLEEP = 0", src, flags=re.M)
+    # Course visualizer helpers: swap the bme590 import for headless
+    # equivalents so no websocket/file servers start in CI.
+    course_shim = (
+        "from contextlib import asynccontextmanager\n"
+        "class _Rec:\n"
+        "    async def start(self): pass\n"
+        "    async def stop(self): pass\n"
+        "def gif_recorder(vis=None, name=None, **kw):\n"
+        "    return _Rec()\n"
+        "@asynccontextmanager\n"
+        "async def gif_recording(vis=None, name=None, **kw):\n"
+        "    yield _Rec()\n"
+        "async def step(m=1.0): pass\n"
+        "def set_step_delay(s): pass\n"
+        "async def visualize_deck(deck, backend, **kw):\n"
+        "    from pylabrobot.liquid_handling import LiquidHandler\n"
+        "    lh = LiquidHandler(backend=backend, deck=deck)\n"
+        "    await lh.setup()\n"
+        "    lh.vis = None\n"
+        "    return lh\n"
+    )
+    src = re.sub(
+        r"^from bme590\.visualizer_ext import [^\n]*\n(?:set_step_delay\(SLEEP\)\n?)?",
+        course_shim,
+        src,
+        flags=re.M,
+    )
     return src
 
 

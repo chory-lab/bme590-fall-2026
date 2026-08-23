@@ -95,6 +95,16 @@ jobs:
             || .venv/Scripts/python.exe scripts/start_workshop.py 01
           test -f assignments/01_deck_setup.ipynb
 
+      # The notebooks bind their kernel by name; pin that name resolving to
+      # THIS venv under clean and polluted states (stale user registration,
+      # JUPYTER_PATH override, dead sibling specs). Hermetic -- see script.
+      - name: Kernel-selection regressions (clean + polluted)
+        shell: bash
+        run: |
+          set -eux
+          if [ -x .venv/bin/python ]; then VPY=.venv/bin/python; else VPY=.venv/Scripts/python.exe; fi
+          "$VPY" scripts/check_kernel_selection.py
+
       # Regression (macOS venv-symlink bug): doctor.py must still reject an
       # interpreter outside the class venv. sys._base_executable is exactly the
       # resolved base path a buggy kernelspec used to point at on macOS. The
