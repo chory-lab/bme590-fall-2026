@@ -57,7 +57,7 @@ You should not have to choose a kernel: the workshops name the class kernel and 
 > Work in `assignments/` and keep it **inside the class folder** — the notebooks load figures by relative path.
 
 ## Guidelines on the use of AI
-AI coding agents are very effective at the solving the types of problems contained in these workbooks, so much so that one could easily solve all of the exercises provided. We insist that you reason through the solutions and write them yourself without directly prompting an LLM for the solution. You are expected to be able to defend the reasoning for your solutions
+AI coding agents are very effective at the solving the types of problems contained in these workbooks, so much so that one could easily solve all of the exercises provided. We insist that you reason through the solutions and write them yourself without directly prompting an LLM for the solution. You are expected to be able to defend the reasoning for your solutions.
 
 ## Help
 
