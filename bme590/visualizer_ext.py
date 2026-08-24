@@ -222,8 +222,14 @@ class RecordingVisualizer(Visualizer):
                         # Declutter: kwarg applies always; ?minimal=1 (or
                         # ?clean=1, ?deck-only=1) toggles it per page load.
                         minimal_kwarg = getattr(server, "_declutter", False)
+                        # keep_blank_values: people type "?minimal", not
+                        # "?minimal=1", and the injected script's
+                        # URLSearchParams.has() accepts the bare flag. Without
+                        # this the two halves disagree and the body class is
+                        # added with no CSS to act on it.
+                        query = parse_qs(parts.query, keep_blank_values=True)
                         minimal_query = any(
-                            q in parse_qs(parts.query) for q in ("minimal", "clean", "deck-only")
+                            q in query for q in ("minimal", "clean", "deck-only")
                         )
                         if minimal_kwarg:
                             # The flag must precede _DECLUTTER_CSS: its script
