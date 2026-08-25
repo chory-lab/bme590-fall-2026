@@ -98,7 +98,12 @@ def main() -> int:
         write_spec(jp_kernels, KERNEL_NAME, display="JP-STALE")
         os.environ["JUPYTER_PATH"] = str(tmp / "jp")
         got = resolve(KERNEL_NAME)
-        if Path(got).resolve() == Path(DEAD_PY):
+        # Both sides must be resolved. On Windows tempfile.gettempdir() can
+        # hand back an 8.3 short path (the CI runner's home is RUNNER~1), and
+        # Path.resolve() expands the alias whenever the prefix exists -- so
+        # comparing a resolved path against the raw DEAD_PY string reports a
+        # kernel-selection regression for two spellings of the same file.
+        if Path(got).resolve() == Path(DEAD_PY).resolve():
             print(f"  ok   jupyter-path -> {got} (env override still wins)")
         elif Path(got).resolve() == Path(venv_py):
             print(f"  ok   jupyter-path -> {got} (precedence flipped in venv's favor)")
