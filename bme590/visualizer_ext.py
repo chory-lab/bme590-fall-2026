@@ -69,7 +69,8 @@ _RECORDER_JS = """
 (function () {
   function install() {
     if (typeof window.processCentralEvent !== "function" ||
-        typeof window.startRecording !== "function") {
+        typeof window.startRecording !== "function" ||
+        typeof window.stopRecording !== "function") {
       return setTimeout(install, 200);
     }
     var origProcessCentralEvent = window.processCentralEvent;
@@ -78,6 +79,15 @@ _RECORDER_JS = """
         var interval = data && data.frame_interval;
         if (typeof interval === "number") {
           interval = Math.max(1, Math.min(96, Math.round(interval)));
+          // lib.js declares `let frameInterval` at the top level of a classic
+          // script, so that binding lives in the global *declarative* record
+          // and is NOT a property of window. Assigning window.frameInterval
+          // creates a lookalike the capture loop never reads -- the slider
+          // would show the new value while recording ran at the old one. An
+          // unqualified assignment resolves up the scope chain to the real
+          // binding; if upstream ever drops it, this degrades to creating the
+          // property, which is what the next line does anyway.
+          try { frameInterval = interval; } catch (e) {}
           window.frameInterval = interval;
           var cv = document.getElementById("current-value");
           var slider = document.getElementById("gif-frame-rate");
@@ -120,6 +130,10 @@ _RECORDER_JS = """
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+    // Release the object URL once the download has certainly started. Revoking
+    // straight after click() can cancel the save in some browsers, so this
+    // waits; without it every recording leaks its blob for the page's lifetime.
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
     window.renderedGifBlob = null; // allow a fresh recording afterwards
   }
 

@@ -26,6 +26,18 @@ async def calls(page, fn=None):
     return [c for c in recorded if fn is None or c["fn"] == fn]
 
 
+async def lexical(page, name):
+    """Read a global `let` binding.
+
+    ``page.evaluate`` compiles its argument into a function, and a function
+    body cannot see the global declarative record -- a top-level ``let`` reads
+    back as "is not defined" there however plainly it exists. A real injected
+    <script> shares that record, so it can.
+    """
+    await page.add_script_tag(content=f"window.__lex = String({name});")
+    return await page.evaluate("window.__lex")
+
+
 async def dispatch(page, event, data=None):
     """Fire an event at the wrapped dispatcher, as the websocket would."""
     return await page.evaluate(
@@ -107,7 +119,45 @@ async def test_start_clears_a_stale_blob_before_recording(harness):
 async def test_frame_interval_is_clamped_and_rounded(harness, sent, expected):
     page = await harness()
     await dispatch(page, "class_start_gif", {"frame_interval": sent})
-    assert await page.evaluate("window.frameInterval") == expected
+    assert await lexical(page, "frameInterval") == str(expected)
+
+
+async def test_the_interval_reaches_the_binding_the_capture_loop_reads(harness):
+    """Regression: setting only ``window.frameInterval`` is invisible to lib.js.
+
+    lib.js reads its own top-level ``let frameInterval`` when it paces capture.
+    A window property of the same name is a different variable, so a recorder
+    that set only that would leave the slider reading 40 while frames were
+    still captured at the stock 8 -- with every other test here green.
+    """
+    page = await harness()
+    assert await lexical(page, "frameInterval") == "8"
+
+    await dispatch(page, "class_start_gif", {"frame_interval": 40})
+
+    assert await lexical(page, "frameInterval") == "40"
+    assert await page.evaluate("window.frameInterval") == 40
+
+
+async def test_install_waits_for_the_stop_recorder_too(harness):
+    """All three wrapped globals must exist, not just two.
+
+    lib.js defines startRecording before stopRecording. Installing on the
+    first alone leaves a window where class_stop_gif calls undefined.
+    """
+    page = await harness(stub_globals=False)
+    await page.evaluate(
+        """() => {
+            window.__calls = [];
+            window.processCentralEvent = function () {};
+            window.startRecording = function () {};
+        }"""
+    )
+    await page.wait_for_timeout(400)  # two retry ticks
+    assert await page.evaluate("window.__classRecorderInstalled") is None
+
+    await page.evaluate("window.stopRecording = function () {}")
+    await page.wait_for_function("window.__classRecorderInstalled === true")
 
 
 @pytest.mark.parametrize("sent, expected", [(24, 24), (200, 96), (0, 1), (7.5, 8)])
@@ -257,7 +307,16 @@ async def test_the_stock_protocol_still_works_between_recordings(harness):
 # browser actually applies it: that the kwarg and each query alias add the body
 # class, and that the elements really compute to display:none.
 
-DECLUTTERED = ("aside#toolbar-left", "#sidepanel", "#sidepanel-resize-handle", "#home-button")
+# The CSS hides bare `aside`, and the stock page has three of them --
+# #toolbar-left, #sidepanel and the right-hand #toolbar. Naming each one keeps
+# a future upstream aside from being silently left visible.
+DECLUTTERED = (
+    "aside#toolbar-left",
+    "aside#toolbar",
+    "#sidepanel",
+    "#sidepanel-resize-handle",
+    "#home-button",
+)
 
 
 async def load_visualizer(page, url):
@@ -278,12 +337,41 @@ async def displays(page):
     }
 
 
+async def main_box(page):
+    """The <main> rule is the half that actually fills the frame."""
+    return await page.eval_on_selector(
+        "main",
+        """el => {
+             const s = getComputedStyle(el);
+             return { position: s.position, w: el.clientWidth, h: el.clientHeight };
+           }""",
+    )
+
+
 async def test_the_declutter_kwarg_hides_the_chrome_in_a_browser(serve, page):
     _, url = serve(declutter=True)
     await load_visualizer(page, url)
 
     assert await page.evaluate("document.body.classList.contains('class-minimal')") is True
     assert await displays(page) == dict.fromkeys(DECLUTTERED, "none")
+
+
+async def test_declutter_makes_the_deck_fill_the_viewport(serve, page):
+    """Hiding the chrome is only half of it: <main> is pinned to the viewport
+    so the recording frames the deck and nothing else."""
+    _, url = serve(declutter=True)
+    await load_visualizer(page, url)
+
+    box = await main_box(page)
+    viewport = await page.evaluate("({w: innerWidth, h: innerHeight})")
+    assert box["position"] == "fixed"
+    assert (box["w"], box["h"]) == (viewport["w"], viewport["h"])
+
+
+async def test_main_is_not_pinned_without_declutter(serve, page):
+    _, url = serve()
+    await load_visualizer(page, url)
+    assert (await main_box(page))["position"] != "fixed"
 
 
 @pytest.mark.parametrize("query", ["?minimal=1", "?clean=1", "?deck-only=1", "?minimal"])

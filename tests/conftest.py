@@ -143,12 +143,19 @@ HARNESS_URL = "http://recorder-harness.test/"
 CDN_HOSTS = ("cdn.jsdelivr.net", "unpkg.com", "cdnjs.cloudflare.com")
 
 # Everything the injected recorder touches on the page, and nothing else: the
-# four globals it wraps or calls, and the two elements it writes the frame
-# interval into. Each stub records its call so a test can assert what the real
+# four globals it wraps or calls, the lexical `frameInterval` it assigns, and
+# the two elements it writes the frame interval into. Each stub records its call so a test can assert what the real
 # script did, including what ``renderedGifBlob`` held at the moment of the call
 # -- that is how "clears the stale blob first" is observed.
 _HARNESS_STUBS = """
 <script>
+  // Mirrors lib.js:783 exactly. `let` at the top level of a classic script
+  // puts the binding in the global declarative record, NOT on window -- the
+  // whole reason the recorder cannot set the interval with a plain
+  // `window.frameInterval = ...`. Declaring it the way the stock page does is
+  // what lets these tests catch that offline; window.frameInterval is
+  // deliberately left unset here so the two are distinguishable.
+  let frameInterval = 8;
   window.__calls = [];
   window.renderedGifBlob = null;
   window.__origReturn = "original-result";

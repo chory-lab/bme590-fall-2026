@@ -46,6 +46,37 @@ def test_upstream_still_exposes_the_elements_declutter_hides():
         assert element in content, f"stock page no longer has {element}"
 
 
+def test_upstream_still_declares_frame_interval_as_a_lexical_global():
+    """The recorder sets the frame interval with an unqualified assignment.
+
+    `let frameInterval` at the top level of a classic script creates a binding
+    in the global declarative record, not a property of window -- which is why
+    the recorder cannot simply write `window.frameInterval`. If upstream moves
+    the declaration into a function or an ES module, the unqualified assignment
+    stops reaching it and silently creates a global instead: the slider would
+    show the requested interval while capture ran at the stock 8.
+    """
+    lib = os.path.join(os.path.dirname(plr_visualizer.__file__), "lib.js")
+    with open(lib, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    declarations = [ln for ln in lines if ln.startswith(("let frameInterval", "var frameInterval"))]
+    assert declarations, "stock lib.js no longer declares frameInterval at the top level"
+
+
+def test_upstream_still_exposes_the_controls_the_recorder_writes():
+    """The recorder mirrors the interval into the page's own slider and label.
+
+    An upstream rename would leave the recording paced correctly but the UI
+    showing a stale number, which is exactly the mismatch this module exists
+    to avoid.
+    """
+    index = os.path.join(os.path.dirname(plr_visualizer.__file__), "index.html")
+    with open(index, "r", encoding="utf-8") as f:
+        content = f.read()
+    for element in ('id="current-value"', 'id="gif-frame-rate"'):
+        assert element in content, f"stock page no longer has {element}"
+
+
 # --- the recorder script ---------------------------------------------------
 
 
