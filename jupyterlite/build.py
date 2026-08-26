@@ -432,7 +432,6 @@ def _opentrons_defs(dest: Path) -> None:
 _DESKTOP_CELLS = (
     "### Getting Started",                              # PLR installation prose
     "#### Auto-complete / Pylance Missing Imports Issue",
-    '"python.analysis.extraPaths"',                     # the settings.json cell
 )
 
 # (cell marker, cut everything before this) -- for cells that mix desktop-only
