@@ -133,7 +133,7 @@ jobs:
     # this job needs a token that can read it. Forks (and PRs from them) do not
     # get repository secrets, and a job that can never pass there is worse than
     # no job at all -- so skip rather than fail.
-    if: github.repository_owner == 'chory-lab' || github.repository_owner == 'stefangolas'
+    if: github.repository_owner == 'chory-lab'
     steps:
       - uses: actions/checkout@v4
 
@@ -147,7 +147,7 @@ jobs:
         if: steps.token.outputs.present == 'true'
         uses: actions/checkout@v4
         with:
-          repository: stefangolas/bme590-fall-2026-solutions
+          repository: chory-lab/bme590-fall-2026-solutions
           token: ${{ secrets.SOLUTIONS_TOKEN }}
           path: solutions
 
@@ -155,7 +155,7 @@ jobs:
         if: steps.token.outputs.present != 'true'
         run: |
           echo "::warning::SOLUTIONS_TOKEN is not set, so the autograder did not run."
-          echo "Add a repo secret with read access to stefangolas/bme590-fall-2026-solutions."
+          echo "Add a repo secret with read access to chory-lab/bme590-fall-2026-solutions."
 
       - name: Run the student installer (posix)
         if: steps.token.outputs.present == 'true'

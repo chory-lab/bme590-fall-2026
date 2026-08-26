@@ -64,3 +64,18 @@ AI coding agents are very effective at the solving the types of problems contain
 If something's broken: run `uv run bme590 check` and paste the **entire** output into `#ed-discuss` on Slack, or email Stefan (stefan dot golas at duke dot edu).
 
 If a new terminal says `command not found: uv` (macOS / Linux) or `uv is not recognized` (Windows), just re-run the install command above — it puts uv on the PATH that new terminals use, on every platform, and tells you which file it changed.
+
+## For maintainers: the answer key and autograder
+
+The solution notebooks are an answer key and never live in this (public) repo. They live in the private repo `chory-lab/bme590-fall-2026-solutions` (branch `main`), generated from `sources/*.py` by `scripts/make_solutions.py`.
+
+- To grade locally, clone it into `solutions/` (gitignored here):
+
+  ```bash
+  git clone https://github.com/chory-lab/bme590-fall-2026-solutions solutions
+  uv run --group notebook python scripts/grade.py solutions/    # must be 24/24 checks, 350/350 points
+  ```
+
+- In CI, the `grade` job in `.github/workflows/workshops.yml` checks out the private repo into `solutions/` using the `SOLUTIONS_TOKEN` repo secret, rebuilds the solution notebooks from `sources/` and asserts they are unchanged (`git diff --exit-code`), grades them (positive control), then grades the untouched workshop stubs (negative control, must score 0). If the secret is absent the job self-skips with a warning rather than failing.
+- `SOLUTIONS_TOKEN` is a fine-grained PAT with read-only `Contents` access to `chory-lab/bme590-fall-2026-solutions`, stored as a repo secret on `chory-lab/bme590-fall-2026`. The workflow's built-in `GITHUB_TOKEN` can only read the repo it runs in, which is why a dedicated token is needed to fetch the private answer key.
+- The old `stefangolas` fork and `stefangolas/bme590-fall-2026-solutions` are no longer used.
