@@ -7,6 +7,11 @@ name: Workshops
 #                     on a bare runner, exactly as a student would, then executes
 #                     every notebook against the environment it produced. This is
 #                     the supported path, so it is the one that gates merges.
+#   tests           — runs the pytest suite over bme590/visualizer_ext.py, the
+#                     one module check_workshops.py cannot cover: it stubs the
+#                     visualizer imports out, so the notebooks exercise fakes.
+#                     Includes a Playwright layer for the browser code the
+#                     module injects into the visualizer page.
 #   grade           — runs the autograder against the reference solutions (a
 #                     separate private repo) and asserts the untouched stubs
 #                     still score zero. Skipped where SOLUTIONS_TOKEN is absent.
@@ -27,6 +32,7 @@ on:
       - "install.sh"
       - "scripts/**"
       - "bme590/**"
+      - "tests/**"
       - ".github/scripts/check_workshops.py"
       - ".github/workflows/workshops.yml"
   pull_request:
@@ -39,6 +45,7 @@ on:
       - "install.sh"
       - "scripts/**"
       - "bme590/**"
+      - "tests/**"
       - ".github/scripts/check_workshops.py"
       - ".github/workflows/workshops.yml"
   workflow_dispatch:
@@ -125,6 +132,32 @@ jobs:
           set -eux
           uv sync --frozen --group notebook
           uv run --frozen python .github/scripts/check_workshops.py
+
+  tests:
+    name: pytest
+    runs-on: ubuntu-latest
+    # Ubuntu only, unlike the installer matrix. What is under test here is a
+    # string-splicing HTTP handler and the browser JS it injects; neither is
+    # platform-sensitive, and the three-OS matrix above already covers the
+    # place where platform actually matters.
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same route to uv as the grade job: the installer brings its own, so no
+      # setup-uv action is needed.
+      - name: Run the student installer
+        run: sh ./install.sh
+
+      # dev is not in default-groups -- students never pay for pytest and a
+      # browser binary -- so it is installed explicitly here.
+      - name: Install the test group
+        run: uv sync --frozen --group dev
+
+      - name: Install Chromium
+        run: uv run --frozen playwright install --with-deps chromium
+
+      - name: Run the test suite
+        run: uv run --frozen pytest tests/ -v
 
   grade:
     name: autograder

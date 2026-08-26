@@ -49,6 +49,20 @@ notebook = [
   "nbclient>=0.10",
 ]
 
+# The test suite. Not installed by `uv sync` (it is not in default-groups), so
+# a student environment never pays for it; CI and maintainers opt in with
+# `uv sync --group dev`.
+#
+# playwright is here because half of what this module ships is browser code:
+# the recorder script that maps websocket commands onto the page's recording
+# globals, and the declutter script/CSS. Neither is reachable from Python, so
+# the only honest way to test them is to run them in a real browser.
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "playwright>=1.44",
+]
+
 # Make `uv sync` (no flags) mean "the student environment". The installers rely
 # on this: any extra flag a student has to type is a step that can go wrong.
 [tool.uv]
@@ -62,3 +76,19 @@ bme590 = ["*.py"]
 
 [tool.setuptools.exclude-package-data]
 "*" = []
+
+# Test configuration. asyncio_mode = "auto" means async test functions run
+# without a per-test @pytest.mark.asyncio decorator.
+#
+# The session loop scopes are what let the `browser` fixture be session-scoped:
+# a fixture and the tests using it must share an event loop, and launching
+# Chromium once instead of once per test is the difference between a suite that
+# runs in seconds and one that runs in minutes.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+markers = [
+  "browser: needs a Playwright-driven Chromium (deselect with -m 'not browser')",
+]
