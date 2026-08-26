@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PyLabRobot in the browser — BME 590 workshop demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<style>
+  /* ---------------------------------------------------------------- *
+   * Jupyter's own metrics and colours: 14px/1.3 monospace input areas,
+   * #303F9F input prompts, #D84315 output prompts, a blue command-mode
+   * bar that turns green in edit mode.
+   * ---------------------------------------------------------------- */
+  :root {
+    --jp-ink: #212121;
+    --jp-muted: #616161;
+    --jp-border: #e0e0e0;
+    --jp-editor-bg: #f7f7f7;
+    --jp-editor-border: #cfcfcf;
+    --jp-in-prompt: #303f9f;
+    --jp-out-prompt: #d84315;
+    --jp-selected: #42a5f5;
+    --jp-editing: #66bb6a;
+    --jp-error-bg: #fdd;
+    --jp-toolbar-bg: #f5f5f5;
+    --jp-code-font: "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+    --jp-code-size: 13px;
+    --jp-prompt-w: 64px;
+    --split: 56%;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; color: var(--jp-ink); background: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+  }
+
+  /* -- top bar -- */
+  #titlebar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 12px; border-bottom: 1px solid var(--jp-border); background: #fff;
+  }
+  #titlebar h1 { font-size: 14px; font-weight: 600; margin: 0; }
+  #titlebar .sub { font-size: 12px; color: var(--jp-muted); font-weight: 400; }
+  .spacer { flex: 1; }
+  #kernel-status { display: flex; align-items: center; gap: 6px;
+                   font-size: 12px; color: var(--jp-muted); }
+  #kernel-status .dot { width: 9px; height: 9px; border-radius: 50%;
+                        border: 1px solid #9e9e9e; background: #fff; }
+  #kernel-status.busy .dot { background: #616161; border-color: #616161; }
+  #kernel-status.starting .dot { background: #f9a825; border-color: #f9a825; }
+  #kernel-status.error .dot { background: #d32f2f; border-color: #d32f2f; }
+
+  /* -- toolbar -- */
+  #toolbar {
+    display: flex; align-items: center; gap: 2px; padding: 3px 8px;
+    background: var(--jp-toolbar-bg); border-bottom: 1px solid var(--jp-border);
+  }
+  #toolbar .sep { width: 1px; height: 20px; background: var(--jp-border); margin: 0 6px; }
+  button, select {
+    font: inherit; font-size: 13px; color: var(--jp-ink);
+    background: transparent; border: 1px solid transparent; border-radius: 3px;
+    padding: 3px 7px; cursor: pointer; line-height: 1.2;
+  }
+  button:hover:not(:disabled), select:hover { background: #e0e0e0; }
+  button:disabled { opacity: .4; cursor: default; }
+  button.text { padding: 3px 9px; border-color: var(--jp-border); background: #fff; }
+  select { border-color: var(--jp-border); background: #fff; padding: 3px 4px; }
+  .icon { font-size: 14px; width: 18px; display: inline-block; text-align: center; }
+
+  /* -- split panes -- */
+  main { display: flex; height: calc(100vh - 66px); align-items: stretch; }
+  #notebook-pane { width: var(--split); overflow-y: auto; overflow-x: hidden;
+                   background: #fff; padding: 12px 0 240px; }
+  #divider { width: 6px; flex: 0 0 6px; cursor: col-resize; background: var(--jp-border);
+             border-left: 1px solid #fff; border-right: 1px solid #fff; }
+  #divider:hover, #divider.dragging { background: var(--jp-selected); }
+  #deck-pane { flex: 1; min-width: 0; display: flex; flex-direction: column;
+               background: var(--jp-toolbar-bg); }
+  .pane-title { padding: 6px 12px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+                text-transform: uppercase; color: var(--jp-muted);
+                background: #fff; border-bottom: 1px solid var(--jp-border); }
+  #plr-deck { flex: 1; min-height: 0; position: relative; }
+  #plr-deck iframe { width: 100%; height: 100%; border: 0; display: block; }
+  #deck-placeholder { position: absolute; inset: 0; display: flex; align-items: center;
+                      justify-content: center; text-align: center; padding: 24px;
+                      color: var(--jp-muted); font-size: 13px; line-height: 1.6; }
+  #plr-deck:has(iframe) #deck-placeholder { display: none; }
+
+  /* -- cells -- */
+  .jp-Cell {
+    display: flex; padding: 2px 12px 2px 0;
+    border-left: 5px solid transparent; border-top: 1px solid transparent;
+    border-bottom: 1px solid transparent;
+  }
+  .jp-Cell.selected { border-left-color: var(--jp-selected); background: #fcfcfc; }
+  .jp-Cell.selected.editing { border-left-color: var(--jp-editing); }
+  .jp-Cell-body { flex: 1; min-width: 0; }
+  .jp-Prompt {
+    flex: 0 0 var(--jp-prompt-w); width: var(--jp-prompt-w);
+    text-align: right; padding: 6px 8px 0 0; user-select: none;
+    font-family: var(--jp-code-font); font-size: 12px; color: var(--jp-in-prompt);
+    white-space: nowrap; overflow: hidden;
+  }
+  .jp-InputArea { display: flex; }
+  .jp-Editor { flex: 1; min-width: 0; background: var(--jp-editor-bg);
+               border: 1px solid var(--jp-editor-border); border-radius: 2px; }
+  .jp-Cell.markdown .jp-Editor { background: #fff; }
+  .CodeMirror { height: auto; background: transparent;
+                font-family: var(--jp-code-font); font-size: var(--jp-code-size);
+                line-height: 1.3077; }
+  .CodeMirror-lines { padding: 4px 0; }
+  .CodeMirror pre.CodeMirror-line { padding-left: 8px; }
+  .CodeMirror-gutters { background: transparent; border-right: 1px solid #eaeaea; }
+  .CodeMirror-linenumber { color: #bdbdbd; font-size: 11px; }
+  .CodeMirror-cursor { border-left: 1px solid #000; }
+
+  /* rendered markdown */
+  .jp-Markdown { padding: 4px 8px 8px; line-height: 1.6; min-height: 22px; cursor: text; }
+  .jp-Markdown h1 { font-size: 22px; margin: 10px 0 8px; font-weight: 600; }
+  .jp-Markdown h2 { font-size: 18px; margin: 12px 0 6px; font-weight: 600; }
+  .jp-Markdown h3 { font-size: 15px; margin: 10px 0 4px; font-weight: 600; }
+  .jp-Markdown p { margin: 0 0 8px; }
+  .jp-Markdown ul, .jp-Markdown ol { margin: 0 0 8px; padding-left: 24px; }
+  .jp-Markdown li { margin: 2px 0; }
+  .jp-Markdown code { font-family: var(--jp-code-font); font-size: 12.5px;
+                      background: #f0f0f0; padding: 1px 4px; border-radius: 3px; }
+  .jp-Markdown pre.md-code { background: var(--jp-editor-bg); border: 1px solid var(--jp-editor-border);
+                             border-radius: 2px; padding: 6px 8px; overflow-x: auto; }
+  .jp-Markdown pre.md-code code { background: none; padding: 0; }
+  .jp-Markdown hr { border: 0; border-top: 1px solid var(--jp-border); margin: 12px 0; }
+  .jp-Markdown a { color: #1976d2; }
+
+  /* outputs */
+  .jp-OutputArea:empty { display: none; }
+  .jp-OutputArea { margin-top: 2px; }
+  .jp-Output { display: flex; align-items: flex-start; }
+  .jp-Output .jp-Prompt { color: var(--jp-out-prompt); padding-top: 4px; }
+  .jp-Output pre { flex: 1; min-width: 0; margin: 0; padding: 4px 8px;
+                   font-family: var(--jp-code-font); font-size: var(--jp-code-size);
+                   line-height: 1.3077; white-space: pre-wrap; word-break: break-word; }
+  .jp-Output.error pre { background: var(--jp-error-bg); color: #b71c1c; }
+  .jp-Output.stderr pre { background: #fdf2f2; }
+
+  /* the between-cells insert affordance */
+  .jp-Gap { height: 12px; display: flex; align-items: center; justify-content: center;
+            opacity: 0; transition: opacity .1s; }
+  .jp-Gap:hover { opacity: 1; }
+  .jp-Gap button { font-size: 11px; padding: 0 8px; background: #fff;
+                   border: 1px solid var(--jp-border); border-radius: 10px;
+                   color: var(--jp-muted); }
+
+  #shortcuts { position: fixed; right: 14px; bottom: 12px; font-size: 11px;
+               color: var(--jp-muted); background: rgba(255,255,255,.9);
+               border: 1px solid var(--jp-border); border-radius: 4px; padding: 4px 8px; }
+  @media (max-width: 900px) {
+    main { flex-direction: column; height: auto; }
+    #notebook-pane, #deck-pane { width: 100%; }
+    #deck-pane { height: 70vh; }
+    #divider { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="titlebar">
+  <h1>PyLabRobot <span class="sub">— notebook in your browser</span></h1>
+  <div class="spacer"></div>
+  <span id="kernel-status" class="starting">
+    <span id="kernel-text">Python (Pyodide) | starting…</span><span class="dot"></span>
+  </span>
+</div>
+
+<div id="toolbar">
+  <button id="btn-save" title="Save to this browser (Ctrl+S)"><span class="icon">💾</span></button>
+  <button id="btn-insert" title="Insert cell below (b)"><span class="icon">＋</span></button>
+  <button id="btn-cut" title="Delete selected cell (dd)"><span class="icon">✂</span></button>
+  <button id="btn-move-up" title="Move cell up (Shift+K)"><span class="icon">▲</span></button>
+  <button id="btn-move-down" title="Move cell down (Shift+J)"><span class="icon">▼</span></button>
+  <span class="sep"></span>
+  <button id="btn-run" title="Run selected cell (Shift+Enter)"><span class="icon">▶</span></button>
+  <button id="btn-restart" title="Restart the kernel: clears every variable"><span class="icon">↻</span></button>
+  <button id="btn-run-all" class="text" title="Run every code cell in order">Run all</button>
+  <select id="cell-type" title="Cell type">
+    <option value="code">Code</option>
+    <option value="markdown">Markdown</option>
+  </select>
+  <span class="spacer"></span>
+  <button id="btn-open" class="text" title="Open a .ipynb from your computer">Open .ipynb</button>
+  <input id="file-open" type="file" accept=".ipynb,application/json" style="display:none">
+  <button id="btn-download" class="text" title="Download this notebook">Download .ipynb</button>
+</div>
+
+<main>
+  <div id="notebook-pane"><div id="notebook"></div></div>
+  <div id="divider" title="Drag to resize"></div>
+  <section id="deck-pane">
+    <div class="pane-title">Deck</div>
+    <div id="plr-deck">
+      <div id="deck-placeholder">The deck appears here once you run the<br>
+        <code>InlineVisualizer</code> cell.</div>
+    </div>
+  </section>
+</main>
+
+<div id="shortcuts">Esc / Enter · Shift+Enter run · a/b insert · dd delete · m/y type · z undo</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/python/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/markdown/markdown.min.js"></script>
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script type="module">
+import {
+  NotebookModel, Keymap, STARTER_CELLS,
+  renderMarkdown, toIpynb, fromIpynb,
+  streamOutput, resultOutput, errorOutput,
+} from "./notebook.js";
+
+/* ------------------------------------------------------------------ *
+ * State
+ * ------------------------------------------------------------------ */
+const NOTEBOOK = document.getElementById("notebook");
+const KSTATUS = document.getElementById("kernel-status");
+const KTEXT = document.getElementById("kernel-text");
+const DB_NAME = "plr-demo";
+const DB_KEY = "notebook-v3";
+
+let pyodide = null;
+let kernel = null;        // the plr_workshops.browser_kernel module proxy
+// Boot takes ~9 s, and the toolbar is live the whole time. Anything that needs
+// the kernel awaits this instead of testing `kernel` and giving up: a click at
+// t=2 s has to run at t=9 s, not silently do nothing.
+let bootFailure = null;
+let markBooted;
+const booted = new Promise((resolve) => { markBooted = resolve; });
+let model = null;
+let mode = "command";     // "command" | "edit"
+let runningId = null;     // cell currently executing, for stdout routing
+let queue = Promise.resolve();
+const keymap = new Keymap();
+const editors = new Map(); // cell id -> CodeMirror
+
+// Exposed so a test harness can drive the page without synthesising clicks.
+const api = {};
+window.__plrDemo = api;
+
+function setKernel(text, cls) {
+  KTEXT.textContent = "Python (Pyodide) | " + text;
+  KSTATUS.className = cls || "";
+}
+
+/* ------------------------------------------------------------------ *
+ * Persistence (IndexedDB, so a refresh keeps your work)
+ * ------------------------------------------------------------------ */
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("kv");
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function dbGet(key) {
+  const db = await openDb();
+  return new Promise((resolve) => {
+    const req = db.transaction("kv", "readonly").objectStore("kv").get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(undefined);
+  });
+}
+async function dbSet(key, value) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("kv", "readwrite");
+    tx.objectStore("kv").put(value, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+let saveTimer = null;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveNow, 500);
+}
+async function saveNow() {
+  syncSources();
+  try { await dbSet(DB_KEY, model.toJSON()); } catch (_) { /* private mode, etc. */ }
+}
+
+/** Pull every editor's text back into the model. */
+function syncSources() {
+  for (const [id, cm] of editors) {
+    const cell = model.get(id);
+    if (cell) cell.source = cm.getValue();
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Rendering
+ * ------------------------------------------------------------------ */
+function promptText(cell) {
+  if (cell.kind === "markdown") return "";
+  if (cell.execCount === "*") return "[*]:";
+  return cell.execCount == null ? "[ ]:" : `[${cell.execCount}]:`;
+}
+
+function makeGap(index) {
+  const gap = document.createElement("div");
+  gap.className = "jp-Gap";
+  const btn = document.createElement("button");
+  btn.textContent = "+ code";
+  btn.tabIndex = -1;
+  btn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    model.insertAt(index, "code", "");
+    render();
+    focusActive();
+  });
+  gap.appendChild(btn);
+  return gap;
+}
+
+function renderCell(cell) {
+  const el = document.createElement("div");
+  el.className = "jp-Cell " + cell.kind;
+  el.dataset.id = cell.id;
+  if (cell.id === model.activeId) {
+    el.classList.add("selected");
+    if (mode === "edit") el.classList.add("editing");
+  }
+
+  const prompt = document.createElement("div");
+  prompt.className = "jp-Prompt";
+  prompt.textContent = promptText(cell);
+  el.appendChild(prompt);
+
+  const body = document.createElement("div");
+  body.className = "jp-Cell-body";
+  el.appendChild(body);
+
+  el.addEventListener("mousedown", () => {
+    if (model.activeId !== cell.id) {
+      model.select(cell.id);
+      refreshSelection();
+    }
+  });
+
+  if (cell.kind === "markdown" && cell.rendered) {
+    const md = document.createElement("div");
+    md.className = "jp-Markdown";
+    md.innerHTML = renderMarkdown(cell.source);
+    md.addEventListener("dblclick", () => {
+      cell.rendered = false;
+      render();
+      enterEdit();
+    });
+    body.appendChild(md);
+    return el;
+  }
+
+  const input = document.createElement("div");
+  input.className = "jp-InputArea";
+  const editor = document.createElement("div");
+  editor.className = "jp-Editor";
+  input.appendChild(editor);
+  body.appendChild(input);
+
+  const cm = CodeMirror(editor, {
+    value: cell.source,
+    mode: cell.kind === "code" ? { name: "python", version: 3 } : "markdown",
+    lineNumbers: cell.kind === "code",
+    indentUnit: 2,
+    tabSize: 2,
+    lineWrapping: cell.kind === "markdown",
+    viewportMargin: Infinity,
+    extraKeys: {
+      "Shift-Enter": () => { command("run-select-below"); },
+      "Ctrl-Enter": () => { command("run"); },
+      "Cmd-Enter": () => { command("run"); },
+      "Alt-Enter": () => { command("run-insert-below"); },
+      "Esc": () => { command("enter-command"); },
+      "Ctrl-S": () => { command("save"); },
+      "Cmd-S": () => { command("save"); },
+      Tab: (editorInstance) => editorInstance.execCommand("indentMore"),
+      "Shift-Tab": (editorInstance) => editorInstance.execCommand("indentLess"),
+    },
+  });
+  cm.on("change", () => { cell.source = cm.getValue(); scheduleSave(); });
+  cm.on("focus", () => {
+    model.select(cell.id);
+    mode = "edit";
+    refreshSelection();
+  });
+  editors.set(cell.id, cm);
+
+  if (cell.kind === "code") {
+    const outputs = document.createElement("div");
+    outputs.className = "jp-OutputArea";
+    outputs.dataset.for = cell.id;
+    body.appendChild(outputs);
+    renderOutputs(cell, outputs);
+  }
+  return el;
+}
+
+function outputsEl(cellId) {
+  return NOTEBOOK.querySelector(`.jp-OutputArea[data-for="${cellId}"]`);
+}
+
+function renderOutputs(cell, container) {
+  const host = container || outputsEl(cell.id);
+  if (!host) return;
+  host.innerHTML = "";
+  for (const out of cell.outputs) {
+    const row = document.createElement("div");
+    row.className = "jp-Output";
+    const p = document.createElement("div");
+    p.className = "jp-Prompt";
+    const pre = document.createElement("pre");
+
+    if (out.output_type === "stream") {
+      p.textContent = "";
+      pre.textContent = out.text;
+      if (out.name === "stderr") row.classList.add("stderr");
+    } else if (out.output_type === "execute_result") {
+      p.textContent = `[${out.execution_count ?? " "}]:`;
+      pre.textContent = out.data["text/plain"];
+    } else {
+      p.textContent = "";
+      pre.textContent = out.traceback.join("\n");
+      row.classList.add("error");
+    }
+    row.appendChild(p);
+    row.appendChild(pre);
+    host.appendChild(row);
+  }
+}
+
+function refreshSelection() {
+  for (const el of NOTEBOOK.querySelectorAll(".jp-Cell")) {
+    const on = el.dataset.id === model.activeId;
+    el.classList.toggle("selected", on);
+    el.classList.toggle("editing", on && mode === "edit");
+  }
+  const cell = model.active;
+  if (cell) document.getElementById("cell-type").value = cell.kind;
+}
+
+function refreshPrompt(cell) {
+  const el = NOTEBOOK.querySelector(`.jp-Cell[data-id="${cell.id}"] > .jp-Prompt`);
+  if (el) el.textContent = promptText(cell);
+}
+
+function render() {
+  syncSources();
+  editors.clear();
+  NOTEBOOK.innerHTML = "";
+  model.cells.forEach((cell, i) => {
+    NOTEBOOK.appendChild(makeGap(i));
+    NOTEBOOK.appendChild(renderCell(cell));
+  });
+  NOTEBOOK.appendChild(makeGap(model.cells.length));
+  // Each editor was constructed while its cell was still detached, so it
+  // measured a zero-height container and drew a single collapsed line. Now that
+  // they are in the document, make them measure again.
+  for (const cm of editors.values()) cm.refresh();
+  refreshSelection();
+}
+
+function scrollActiveIntoView() {
+  const el = NOTEBOOK.querySelector(`.jp-Cell[data-id="${model.activeId}"]`);
+  if (el) el.scrollIntoView({ block: "nearest" });
+}
+
+/* ------------------------------------------------------------------ *
+ * Modes
+ * ------------------------------------------------------------------ */
+function enterEdit() {
+  const cell = model.active;
+  if (!cell) return;
+  if (cell.kind === "markdown" && cell.rendered) {
+    cell.rendered = false;
+    render();
+  }
+  mode = "edit";
+  refreshSelection();
+  const cm = editors.get(model.activeId);
+  if (cm) cm.focus();
+}
+
+function enterCommand() {
+  mode = "command";
+  const cm = editors.get(model.activeId);
+  if (cm) cm.getInputField().blur();
+  refreshSelection();
+}
+
+/* ------------------------------------------------------------------ *
+ * Execution
+ * ------------------------------------------------------------------ */
+function enqueue(fn) {
+  queue = queue.then(fn, fn);
+  return queue;
+}
+
+function emitStream(text, name) {
+  if (runningId == null) return;
+  const cell = model.get(runningId);
+  if (!cell) return;
+  model.addOutput(runningId, streamOutput(text, name));
+  renderOutputs(cell);
+}
+
+/** Run one cell and wait for it. Markdown cells just render. */
+function runCell(id) {
+  const cell = model.get(id);
+  if (!cell) return Promise.resolve();
+  if (cell.kind === "markdown") {
+    cell.rendered = true;
+    render();
+    scheduleSave();
+    return Promise.resolve();
+  }
+  return enqueue(async () => {
+    const c = model.get(id);
+    if (!c) return;
+    c.source = editors.get(id) ? editors.get(id).getValue() : c.source;
+    if (!c.source.trim()) return;
+
+    // Queued behind a boot that has not finished. Say so, then wait -- the
+    // alternative (return quietly) looks exactly like a cell that ran and
+    // produced nothing, which is how "Run all does nothing" used to happen.
+    if (!kernel) {
+      c.execCount = "*";
+      refreshPrompt(c);
+      setKernel("queued — waiting for the kernel", "starting");
+      await booted;
+    }
+    if (!kernel) {
+      model.addOutput(id, errorOutput(
+        "KernelError: the Python kernel failed to start, so this cell did not run.\n" +
+        (bootFailure ? String(bootFailure) : "")
+      ));
+      c.execCount = null;
+      refreshPrompt(c);
+      renderOutputs(c);
+      return;
+    }
+
+    model.beginExec(id);
+    const count = c.execCount;
+    c.execCount = "*";
+    refreshPrompt(c);
+    renderOutputs(c);
+    runningId = id;
+    setKernel("busy", "busy");
+
+    let payload;
+    try {
+      payload = JSON.parse(await kernel.run_cell(c.source, `Cell In[${count}]`));
+    } catch (e) {
+      payload = { ok: false, ename: "KernelError", evalue: String(e && e.message || e),
+                  traceback: String(e && e.stack || e) };
+    }
+    if (payload.ok) {
+      if (payload.repr != null) model.addOutput(id, resultOutput(payload.repr, count));
+    } else {
+      const err = errorOutput(payload.traceback || `${payload.ename}: ${payload.evalue}`);
+      err.ename = payload.ename || err.ename;
+      err.evalue = payload.evalue || err.evalue;
+      model.addOutput(id, err);
+    }
+    c.execCount = count;
+    runningId = null;
+    refreshPrompt(c);
+    renderOutputs(c);
+    setKernel("idle");
+    scheduleSave();
+    return payload;
+  });
+}
+
+function runAll() {
+  const ids = model.cells.map((c) => c.id);
+  let last = Promise.resolve();
+  for (const id of ids) {
+    const cell = model.get(id);
+    if (cell.kind === "markdown") { cell.rendered = true; continue; }
+    last = runCell(id);
+  }
+  render();
+  return last;
+}
+
+async function restartKernel() {
+  await booted;
+  if (!kernel) return;
+  await enqueue(async () => {
+    kernel.reset();
+    model.resetExecution();
+    const deck = document.getElementById("plr-deck");
+    for (const frame of deck.querySelectorAll("iframe")) frame.remove();
+    render();
+    setKernel("idle");
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Commands (one entry point for keys, buttons and tests)
+ * ------------------------------------------------------------------ */
+function command(name) {
+  switch (name) {
+    case "enter-edit": enterEdit(); break;
+    case "enter-command": enterCommand(); break;
+    case "run":
+      runCell(model.activeId);
+      enterCommand();
+      break;
+    case "run-select-below": {
+      const id = model.activeId;
+      const isLast = model.activeIndex === model.cells.length - 1;
+      runCell(id);
+      if (isLast) { model.insertBelow("code", ""); render(); }
+      else { model.selectDelta(1); refreshSelection(); }
+      enterCommand();
+      scrollActiveIntoView();
+      break;
+    }
+    case "run-insert-below":
+      runCell(model.activeId);
+      model.insertBelow("code", "");
+      render();
+      enterEdit();
+      break;
+    case "insert-above": model.insertAbove("code", ""); render(); enterEdit(); break;
+    case "insert-below": model.insertBelow("code", ""); render(); enterEdit(); break;
+    case "delete": model.remove(model.activeId); render(); scheduleSave(); break;
+    case "undo-delete": model.undoDelete(); render(); scheduleSave(); break;
+    case "to-markdown": model.setKind(model.activeId, "markdown"); render(); scheduleSave(); break;
+    case "to-code": model.setKind(model.activeId, "code"); render(); scheduleSave(); break;
+    case "select-prev": model.selectDelta(-1); refreshSelection(); scrollActiveIntoView(); break;
+    case "select-next": model.selectDelta(1); refreshSelection(); scrollActiveIntoView(); break;
+    case "move-up": model.move(model.activeId, -1); render(); scheduleSave(); break;
+    case "move-down": model.move(model.activeId, 1); render(); scheduleSave(); break;
+    case "save": saveNow(); break;
+    case "interrupt-hint":
+      setKernel("no interrupt in the browser — reload to stop a runaway cell", "error");
+      setTimeout(() => setKernel("idle"), 4000);
+      break;
+    default: break;
+  }
+}
+
+document.addEventListener("keydown", (evt) => {
+  const inEditor = evt.target.closest && evt.target.closest(".CodeMirror");
+  // CodeMirror handles its own keys through extraKeys; only command mode and
+  // the global save shortcut are ours.
+  if (inEditor && !(evt.key === "s" && (evt.ctrlKey || evt.metaKey))) return;
+  if (evt.target.tagName === "SELECT" || evt.target.tagName === "INPUT") return;
+  const cmd = keymap.handle(evt, inEditor ? "edit" : "command");
+  if (!cmd) return;
+  evt.preventDefault();
+  command(cmd);
+});
+
+/* ------------------------------------------------------------------ *
+ * Toolbar
+ * ------------------------------------------------------------------ */
+const on = (id, fn) => document.getElementById(id).addEventListener("click", fn);
+on("btn-save", () => command("save"));
+on("btn-insert", () => command("insert-below"));
+on("btn-cut", () => command("delete"));
+on("btn-move-up", () => command("move-up"));
+on("btn-move-down", () => command("move-down"));
+on("btn-run", () => command("run-select-below"));
+on("btn-restart", () => {
+  if (confirmRestart()) restartKernel();
+});
+on("btn-run-all", () => runAll());
+document.getElementById("cell-type").addEventListener("change", (e) => {
+  command(e.target.value === "markdown" ? "to-markdown" : "to-code");
+});
+
+// window.confirm blocks the page (and any automation driving it); a small
+// inline confirmation in the status area does the same job.
+let restartArmed = false;
+function confirmRestart() {
+  if (restartArmed) { restartArmed = false; return true; }
+  restartArmed = true;
+  setKernel("click ↻ again to restart and clear all variables", "starting");
+  setTimeout(() => {
+    if (restartArmed) { restartArmed = false; setKernel("idle"); }
+  }, 4000);
+  return false;
+}
+
+on("btn-download", () => {
+  syncSources();
+  const blob = new Blob([JSON.stringify(toIpynb(model), null, 1)],
+                        { type: "application/x-ipynb+json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "plr_workshop_demo.ipynb";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 0);
+});
+
+on("btn-open", () => document.getElementById("file-open").click());
+document.getElementById("file-open").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  if (!file) return;
+  try {
+    model = fromIpynb(JSON.parse(await file.text()));
+    render();
+    scheduleSave();
+  } catch (err) {
+    setKernel("could not open that notebook: " + err.message, "error");
+  }
+  e.target.value = "";
+});
+
+/* -- draggable split -- */
+(function () {
+  const divider = document.getElementById("divider");
+  const saved = localStorage.getItem("plr-split");
+  if (saved) document.documentElement.style.setProperty("--split", saved);
+  let dragging = false;
+  divider.addEventListener("mousedown", (e) => {
+    dragging = true;
+    divider.classList.add("dragging");
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const pct = Math.min(85, Math.max(20, (e.clientX / window.innerWidth) * 100));
+    document.documentElement.style.setProperty("--split", pct.toFixed(1) + "%");
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    divider.classList.remove("dragging");
+    localStorage.setItem("plr-split",
+      getComputedStyle(document.documentElement).getPropertyValue("--split").trim());
+  });
+})();
+
+/* ------------------------------------------------------------------ *
+ * Boot
+ * ------------------------------------------------------------------ */
+const PY_MODULES = [
+  "__init__.py", "transport.py", "inline.py", "frontend.py",
+  "pyodide_transport.py", "browser_kernel.py", "vendor.py",
+];
+
+// Inlined into the visualizer page by frontend.py, which runs *inside* Pyodide
+// and so can only read what we have put in its filesystem. build_demo.py
+// rewrites this list from the directory it actually ships, so the two cannot
+// drift apart.
+const PY_VENDOR = ["konva.min.js"];
+
+async function loadPlrWorkshops() {
+  const dir = "/home/pyodide/plr_workshops";
+  try { pyodide.FS.mkdir(dir); } catch (_) { /* already there */ }
+  try { pyodide.FS.mkdir(dir + "/_vendored"); } catch (_) { /* already there */ }
+  // Bytes, not text: one of these is a PNG, and decoding it as UTF-8 would
+  // quietly corrupt it into an unreadable image.
+  const vendored = await Promise.all(PY_VENDOR.map(async (f) => {
+    const resp = await fetch(`py/plr_workshops/_vendored/${f}`, { cache: "no-store" });
+    if (!resp.ok) throw new Error(`could not fetch py/plr_workshops/_vendored/${f}`);
+    return [f, new Uint8Array(await resp.arrayBuffer())];
+  }));
+  for (const [f, bytes] of vendored) pyodide.FS.writeFile(`${dir}/_vendored/${f}`, bytes);
+  const sources = await Promise.all(PY_MODULES.map(async (f) => {
+    // no-store, not the default: these are build output that changes every time
+    // build_demo.py runs, and the HTTP cache will otherwise serve yesterday's
+    // module after a rebuild -- an edit that silently does nothing on reload.
+    const resp = await fetch(`py/plr_workshops/${f}`, { cache: "no-store" });
+    if (!resp.ok) throw new Error(`could not fetch py/plr_workshops/${f}`);
+    return [f, await resp.text()];
+  }));
+  for (const [f, text] of sources) pyodide.FS.writeFile(`${dir}/${f}`, text);
+}
+
+async function boot() {
+  try {
+    setKernel("loading Pyodide…", "starting");
+    pyodide = await loadPyodide();
+    pyodide.setStdout({ batched: (s) => emitStream(s + "\n", "stdout") });
+    pyodide.setStderr({ batched: (s) => emitStream(s + "\n", "stderr") });
+    setKernel("installing pylabrobot 0.2.2…", "starting");
+    await pyodide.loadPackage(["micropip", "ssl"]);
+    await pyodide.runPythonAsync('import micropip; await micropip.install("pylabrobot==0.2.2")');
+    await loadPlrWorkshops();
+    kernel = pyodide.pyimport("plr_workshops.browser_kernel");
+    api.kernel = kernel;
+    api.pyodide = pyodide;
+    setKernel("idle");
+  } catch (e) {
+    bootFailure = e && e.message ? e.message : e;
+    setKernel("failed to start: " + bootFailure, "error");
+    console.error(e);
+  } finally {
+    // Always settle, success or not: anything waiting on the kernel has to be
+    // released, or a failed boot leaves every queued cell hanging on "*".
+    markBooted();
+  }
+}
+
+(async () => {
+  let saved;
+  try { saved = await dbGet(DB_KEY); } catch (_) { saved = undefined; }
+  const cells = saved && Array.isArray(saved.cells) && saved.cells.length
+    ? saved.cells : STARTER_CELLS;
+  model = new NotebookModel(cells);
+  render();
+
+  // Test/automation surface: everything the UI does, callable directly.
+  // model and mode are live getters (they are reassigned), so they cannot be
+  // copied in with Object.assign.
+  Object.defineProperties(api, {
+    model: { get: () => model },
+    mode: { get: () => mode },
+  });
+  Object.assign(api, {
+    command, runCell, runAll, restartKernel, render, saveNow,
+    // Writing straight to cell.source would be undone by the next render, which
+    // syncs from the editors; go through the editor like a typing user.
+    setSource: (id, text) => {
+      const cm = editors.get(id);
+      if (cm) cm.setValue(text); else model.setSource(id, text);
+    },
+    toIpynb: () => toIpynb(model),
+    loadIpynb: (nb) => { model = fromIpynb(nb); render(); },
+    reset: () => { model = new NotebookModel(STARTER_CELLS); render(); scheduleSave(); },
+    // A promise, not a predicate. `await ready()` used to resolve instantly on a
+    // boolean, so a harness would drive a page whose kernel did not exist yet
+    // and every cell would quietly no-op.
+    ready: () => booted.then(() => kernel != null),
+  });
+
+  boot();
+})();
+</script>
+</body>
+</html>

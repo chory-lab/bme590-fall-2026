@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BME 590 · PyLabRobot Workshops</title>
+<style>
+  :root {
+    --ui-font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --rule: #ddd;
+    --gutter: 8px;
+  }
+  html, body { margin: 0; height: 100%; font-family: var(--ui-font); }
+  #wrap { display: flex; height: 100vh; }
+  #left, #right { height: 100%; min-width: 0; }
+  #left { flex: 1 1 auto; }
+  #right {
+    /* Width is owned by the splitter below; flex-basis is the live value.
+       Even split by default: the deck is the point of the exercise, not a
+       preview, and the notebook still gets a comfortable column at 50%. */
+    flex: 0 0 50%;
+    border-left: 1px solid var(--rule);
+    display: flex;
+    flex-direction: column;
+  }
+  /* Runtime status. A thin bar rather than an overlay: the notebook stays
+     readable and scrollable while the kernel is being prepared, and the bar is
+     the only place a silent bootstrap failure can surface. */
+  #status {
+    display: none;
+    position: fixed; left: 0; right: 0; top: 0; z-index: 9998;
+    padding: 6px 14px;
+    font-size: 13px;
+    background: #eef3fb; color: #21324a;
+    border-bottom: 1px solid #c9d8ee;
+  }
+  #status.error { background: #fdecea; color: #7a1c12; border-bottom-color: #f2c2bc; }
+  body.has-status #status { display: block; }
+  body.has-status #wrap { height: calc(100vh - 30px); margin-top: 30px; }
+
+  #right h2 {
+    margin: 0;
+    padding: 9px 14px;
+    flex: none;
+    font-family: var(--ui-font);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: #5b6472;
+    background: #f8f9fa;
+    border-bottom: 1px solid var(--rule);
+    user-select: none;
+  }
+  iframe { width: 100%; height: 100%; border: 0; }
+
+  /* The drag handle between the notebook and the deck. */
+  #split {
+    flex: 0 0 var(--gutter);
+    cursor: col-resize;
+    background: #f1f3f5;
+    border-left: 1px solid var(--rule);
+    border-right: 1px solid var(--rule);
+    position: relative;
+  }
+  #split::after {
+    content: "";
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 2px; height: 28px;
+    margin: -14px 0 0 -1px;
+    border-radius: 1px;
+    background: #b9c0c8;
+  }
+  #split:hover, #split.dragging { background: #e3e7ea; }
+  /* While dragging, the iframes must not swallow mousemove. */
+  body.resizing iframe { pointer-events: none; }
+  body.resizing { cursor: col-resize; user-select: none; }
+
+  /* Shown when this origin is already open in another tab. */
+  #dupe {
+    display: none;
+    position: fixed; inset: 0; z-index: 9999;
+    background: #fff;
+    align-items: center; justify-content: center;
+    text-align: center; padding: 24px;
+  }
+  body.duplicate #dupe { display: flex; }
+  body.duplicate #wrap { visibility: hidden; }
+  #dupe > div { max-width: 30rem; }
+  #dupe h1 { font-size: 1.25rem; margin: 0 0 .5rem; }
+  #dupe p { color: #5b6472; line-height: 1.5; margin: 0 0 1.25rem; }
+  #dupe button {
+    font: inherit; font-weight: 600;
+    padding: .5rem 1rem; border-radius: 6px;
+    border: 1px solid #0d6efd; background: #0d6efd; color: #fff;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+<div id="dupe">
+  <div>
+    <h1>Already open in another tab</h1>
+    <p>
+      The workshops run entirely in your browser, and two copies on the same
+      origin fight over the same storage and service worker — which shows up as
+      a notebook that boots forever or loses its kernel. Switch to the other
+      tab, or take over here.
+    </p>
+    <button id="dupe-takeover" type="button">Use this tab instead</button>
+  </div>
+</div>
+<div id="status" role="status" aria-live="polite"></div>
+<div id="wrap">
+  <div id="left">
+    <iframe id="lite" src="./output/lab/index.html?path=workshops/00_plr_introduction.ipynb"
+            allow="clipboard-read; clipboard-write"></iframe>
+  </div>
+  <div id="split" role="separator" aria-orientation="vertical" tabindex="0"
+       aria-label="Resize the deck panel" title="Drag to resize"></div>
+  <div id="right">
+    <h2>Deck</h2>
+    <iframe id="deck" src="./deck.html"></iframe>
+  </div>
+</div>
+<script>
+  // ---- Single-instance guard -------------------------------------------
+  //
+  // JupyterLite keeps its contents in IndexedDB and serves /files/ through a
+  // service worker, both scoped to the origin -- so a second tab is a second
+  // client of one shared, single-writer store. The visible failure mode is the
+  // service worker churning ("New version, unregistering existing service
+  // workers" on a loop), which starves the kernel extension and leaves the
+  // notebook with no kernel and no error. It is indistinguishable from a broken
+  // deploy, so say it out loud rather than let a student debug a phantom.
+  //
+  // The newest tab yields; a button lets it take over instead, which parks the
+  // older tabs on the same notice. Nothing here can prevent a second tab opened
+  // straight to output/lab/index.html -- only same-origin pages that run this
+  // script participate.
+  (function () {
+    if (!("BroadcastChannel" in window)) return;  // pre-2022 Safari: skip
+    const ch = new BroadcastChannel("plr-workshops-instance");
+    const me = Math.random().toString(36).slice(2);
+    let settled = false;
+
+    function yieldTab() {
+      settled = true;
+      document.body.classList.add("duplicate");
+      // Stop the iframes doing storage work while parked.
+      for (const f of document.querySelectorAll("iframe")) f.src = "about:blank";
+    }
+
+    ch.addEventListener("message", (e) => {
+      const m = e.data || {};
+      if (m.type === "hello" && m.from !== me && !document.body.classList.contains("duplicate")) {
+        ch.postMessage({ type: "here", from: me });      // "I was here first"
+      } else if (m.type === "here" && m.from !== me && !settled) {
+        yieldTab();
+      } else if (m.type === "takeover" && m.from !== me) {
+        yieldTab();
+      }
+    });
+
+    ch.postMessage({ type: "hello", from: me });
+    // No reply in 400ms means we are the only tab.
+    setTimeout(() => { settled = true; }, 400);
+
+    document.getElementById("dupe-takeover").addEventListener("click", () => {
+      ch.postMessage({ type: "takeover", from: me });
+      location.reload();
+    });
+  })();
+</script>
+<script>
+  // ?nb=<path>.ipynb overrides which notebook JupyterLite opens (driver
+  // support). A full path from the drive root -- "workshops/00_x.ipynb", not
+  // "00_x.ipynb". An earlier version helpfully prefixed bare names with
+  // "workshops/", which silently opened an empty untitled notebook for anything
+  // living elsewhere (deck.ipynb at the root), and a driver run against an
+  // empty notebook looks exactly like a run whose cells all did nothing.
+  const q = new URLSearchParams(location.search);
+  const nb = q.get("nb");
+  if (nb) document.getElementById("lite").src = "./output/lab/index.html?path=" + nb;
+</script>
+<script>
+  // The splitter. Width is persisted so a student's layout survives a reload.
+  //
+  // The deck re-fits itself on #kanvas resize (see frontend.py's auto-fit), so
+  // dragging rescales the deck rather than cropping it -- but that patch skips
+  // re-fitting below 120px, where fitToViewport()'s unfloored 40px-per-side
+  // padding would go negative and render the deck mirrored. The clamp below
+  // keeps both panes well clear of that.
+  const MIN_PANE = 220;
+  const wrap = document.getElementById("wrap");
+  const right = document.getElementById("right");
+  const split = document.getElementById("split");
+  const KEY = "plr.deckWidth";
+
+  function setWidth(px) {
+    const total = wrap.clientWidth - split.offsetWidth;
+    const clamped = Math.max(MIN_PANE, Math.min(px, total - MIN_PANE));
+    right.style.flexBasis = clamped + "px";
+    return clamped;
+  }
+
+  const saved = parseFloat(localStorage.getItem(KEY));
+  if (saved > 0) setWidth(saved);
+
+  let dragging = false;
+  split.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    split.setPointerCapture(e.pointerId);
+    split.classList.add("dragging");
+    document.body.classList.add("resizing");
+    e.preventDefault();
+  });
+  split.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    // Distance from the pointer to the right edge of the window.
+    setWidth(wrap.getBoundingClientRect().right - e.clientX);
+  });
+  function endDrag(e) {
+    if (!dragging) return;
+    dragging = false;
+    if (e && e.pointerId !== undefined) {
+      try { split.releasePointerCapture(e.pointerId); } catch (_) {}
+    }
+    split.classList.remove("dragging");
+    document.body.classList.remove("resizing");
+    localStorage.setItem(KEY, parseFloat(right.style.flexBasis) || right.offsetWidth);
+  }
+  split.addEventListener("pointerup", endDrag);
+  split.addEventListener("pointercancel", endDrag);
+
+  // Keyboard parity: the handle is focusable, so arrows must move it too.
+  split.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 50 : 10;
+    if (e.key === "ArrowLeft") setWidth(right.offsetWidth + step);
+    else if (e.key === "ArrowRight") setWidth(right.offsetWidth - step);
+    else return;
+    e.preventDefault();
+    localStorage.setItem(KEY, right.offsetWidth);
+  });
+  // Double-click restores the default split.
+  split.addEventListener("dblclick", () => {
+    right.style.flexBasis = "50%";
+    localStorage.removeItem(KEY);
+  });
+</script>
+<script src="./bridge.js"></script>
+<script>
+  // The relay between the two channels:
+  //   kernel -> widget (in #lite) -> us -> #deck
+  //   #deck -> us, #lite widget -> us  (two readiness signals)
+  //
+  // The parent owns the queue: visualizer events are held until BOTH sides are
+  // ready (deck parsed its renderer, widget mounted its frontend), then flushed
+  // in order. No timing assumptions -- a setup() burst landing before either
+  // side is ready cannot be lost.
+  const lite = document.getElementById("lite");
+  const deck = document.getElementById("deck");
+
+  const statusBar = document.getElementById("status");
+  function setStatus(text, isError) {
+    if (!text) {
+      document.body.classList.remove("has-status");
+      return;
+    }
+    statusBar.textContent = text;
+    statusBar.classList.toggle("error", !!isError);
+    document.body.classList.add("has-status");
+    if (isError) console.error("[plr]", text);
+  }
+  let deckReady = false;   // DECK_READY: the deck iframe parsed lib.js
+  let bridgeReady = false; // BRIDGE_READY: the widget frontend mounted
+  const queue = [];
+
+  function flush() {
+    if (!(deckReady && bridgeReady)) return;
+    queue.splice(0).forEach((m) => deck.contentWindow.postMessage(m, "*"));
+    // Tell the widget it may unmute Python's replay.
+    lite.contentWindow.postMessage({ __plrReady: true }, "*");
+  }
+
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (!d) return;
+
+    // The deck iframe has parsed the renderer.
+    if (d.__plrReady) { deckReady = true; flush(); return; }
+    // The bridge widget has mounted its frontend.
+    if (d.__plrBridgeUp) { bridgeReady = true; flush(); return; }
+    // Visualizer events from the kernel, to be rendered by the deck.
+    if (typeof d.__plrEvent === "string") {
+      if (deckReady && bridgeReady) deck.contentWindow.postMessage(d, "*");
+      else queue.push(d);
+      return;
+    }
+    // Ack traffic from the deck.
+    if (d.__plrAck) console.log("[plr] deck ack:", d.__plrAck);
+
+    // Runtime setup, from the plr-workshops:bootstrap labextension. It runs
+    // `silent`, so nothing lands in the notebook and a failure would otherwise
+    // be invisible until a cell died on an import several minutes later.
+    if (d.type === "PLR_BOOTSTRAP_STARTED") setStatus("Preparing the workshop runtime…");
+    if (d.type === "PLR_BOOTSTRAP_READY") setStatus(null);
+    if (d.type === "PLR_BOOTSTRAP_FAILED") {
+      setStatus("Workshop runtime failed to initialise: " + (d.error || "unknown error"), true);
+    }
+  });
+</script>
+</body>
+</html>

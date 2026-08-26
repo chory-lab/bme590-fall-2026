@@ -38,3 +38,21 @@ data/exercise_4.csv
 #   git clone https://github.com/stefangolas/bme590-fall-2026-solutions solutions
 # This repo is public, so the directory must never be committed here.
 solutions/
+
+# JupyterLite workshop site build artifacts (jupyterlite/build.py).
+# bridge.js IS committed: it is the deterministic esbuild bundle that CI and
+# static hosts serve, and regenerating it needs npm.
+.vendor-cache/
+jupyterlite/output/
+jupyterlite/deploy/
+jupyterlite/.cache/
+jupyterlite/.jupyterlite.doit.db
+jupyterlite/content/
+jupyterlite/deck.html
+jupyterlite/node_modules/
+node_modules/
+.cache/
+.jupyterlite.doit.db
+
+# Static Pyodide demo (build artifact of plr_workshops/build_demo.py).
+demo/

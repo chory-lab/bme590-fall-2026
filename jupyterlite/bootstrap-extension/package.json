@@ -1,0 +1,42 @@
+{
+  "name": "plr-workshops-bootstrap",
+  "version": "0.1.0",
+  "description": "Prepares each Pyodide kernel for the BME 590 workshops, so the notebooks carry no environment-management code.",
+  "private": true,
+  "license": "BSD-3-Clause",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib/**/*.{d.ts,js,js.map}",
+    "style/**/*.css"
+  ],
+  "scripts": {
+    "build": "tsc && jupyter labextension build .",
+    "clean": "rimraf lib labextension"
+  },
+  "_comment_versions": [
+    "Exact pins, not carets, and they must match the JupyterLab the site ships",
+    "(jupyterlite-core 0.8.1 -> JupyterLab 4.6.0, @jupyterlab/services 7.6.0).",
+    "A caret resolves to 4.6.3 today, and the extension would then declare",
+    "^4.6.3 for shared singletons the app provides at 4.6.0. The federation",
+    "runtime declines the mismatch with only a console warning, and the plugin",
+    "never activates -- which is exactly how the pyodide kernel extension came",
+    "to register zero kernels on the deployed site.",
+    "",
+    "@jupyterlab/builder has no stable 4.6.x; it is a build-time-only webpack",
+    "wrapper and does not participate in singleton sharing, so 4.5.x is fine."
+  ],
+  "dependencies": {
+    "@jupyterlab/application": "4.6.0",
+    "@jupyterlab/notebook": "4.6.0",
+    "@jupyterlab/services": "7.6.0"
+  },
+  "devDependencies": {
+    "@jupyterlab/builder": "~4.5.10",
+    "typescript": "~5.5.4"
+  },
+  "jupyterlab": {
+    "extension": true,
+    "outputDir": "labextension"
+  }
+}
