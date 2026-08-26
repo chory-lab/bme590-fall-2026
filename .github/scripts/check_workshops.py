@@ -200,7 +200,7 @@ def neutralize(src):
         "    return lh\n"
     )
     src = re.sub(
-        r"^from bme590\.visualizer_ext import [^\n]*\n(?:set_step_delay\(SLEEP\)\n?)?",
+        r"^from bme590\.visualizer_ext import [^\n]*\n?(?:set_step_delay\(SLEEP\)\n?)?",
         course_shim,
         src,
         flags=re.M,
