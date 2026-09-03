@@ -594,10 +594,11 @@ def next_steps(root: Path) -> str:
      (your copy lands in assignments, where class updates cannot overwrite it)
   4. The notebook's top right should already read "BME 590 (lab automation)".
      Nothing to pick -- the workshops name that kernel, and step 3 registered it.
-     If it says "Select Kernel" instead, click it, choose
-     "Select Another Kernel..." -> "Python Environments...", and pick
-     "BME 590 (lab automation)". Not "Existing Jupyter Server...", which asks
-     for a URL.
+     If it says "Select Kernel" instead, click it (then "Select Another
+     Kernel...", if VS Code offers it), choose "Python Environments...", and
+     pick the .venv in the class folder -- listed as "BME 590 (lab automation)"
+     or as ".venv (Python 3.11)" depending on your VS Code version. Not
+     "Existing Jupyter Server...", which asks for a URL.
 
 Every `uv run bme590` command pulls the latest course materials first, so you
 stay up to date just by working. If anything ever looks wrong:  uv run bme590 check

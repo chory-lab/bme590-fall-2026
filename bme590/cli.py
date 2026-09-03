@@ -356,9 +356,10 @@ VS Code window."""
 While you work:
   - Run the cells in order. The kernel is already chosen: the notebook's top
     right should read "BME 590 (lab automation)". If it reads "Select Kernel",
-    click it, choose "Select Another Kernel..." then "Python Environments...",
-    and pick "BME 590 (lab automation)". Do not pick "Existing Jupyter
-    Server..." -- that one asks for a URL and is not what you want.
+    click it, choose "Python Environments..." (under "Select Another Kernel..."
+    if your VS Code shows that first), and pick the .venv in this folder --
+    listed as "BME 590 (lab automation)" or ".venv (Python 3.11)". Do not pick
+    "Existing Jupyter Server..." -- that one asks for a URL and is a dead end.
   - When a cell starts the Visualizer, your browser opens {VISUALIZER_URL}
     and the top right should read "Connected". If it does not, reload that page.
   - Re-running a Visualizer cell leaves the old one running, and your browser

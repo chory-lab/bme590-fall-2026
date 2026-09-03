@@ -54,6 +54,7 @@ __all__ = [
     "step",
     "set_step_delay",
     "visualize_deck",
+    "close_visualizer",
 ]
 
 # ---------------------------------------------------------------------------
@@ -420,6 +421,10 @@ def gif_recorder(
     Args:
         vis: The visualizer to record (e.g. ``lh.vis`` from :func:`visualize_deck`).
         name: Download filename for the GIF. Use the exact submission filename.
+            A filename, not a path: the browser performs the download, so the file
+            lands in its download directory and path separators are flattened
+            (``runs/out.gif`` saves as ``runs_out.gif``). Pinned in
+            tests/test_recorder_js.py.
         frame_interval: Slider ticks between frames (1-96); each frame is
             ``max(200, tick * 50)`` ms apart. Larger = smaller GIFs.
         max_duration: Safety timeout in seconds; a recording still running is
@@ -463,6 +468,40 @@ async def gif_recording(
 _HEADLESS = os.environ.get("BME590_HEADLESS", "").lower() in {"1", "true", "yes"}
 
 
+# The visualizer session this process last created, if it is still up.
+# Notebooks call visualize_deck() more than once -- workshop 00 does it twice by
+# design, and every student does it again after a mistake -- and the second call
+# used to leave the first one running. That is not merely untidy: PLR's file
+# server does not move off port 1337 when it is taken, so the page a student
+# opens keeps advertising the FIRST visualizer's websocket port. The browser
+# then talks to the old session while the notebook records the new one, and
+# `rec.start()` waits 60s for a connection that cannot arrive. Verified against
+# pylabrobot 0.2.2: a second setup lands on ws 2122 while the served page still
+# says 2121.
+_active: "LiquidHandler | None" = None
+
+
+async def close_visualizer() -> None:
+    """Shut down the visualizer session this process last opened, if any.
+
+    Safe to call when there is nothing open. :func:`visualize_deck` calls it
+    for you; it is public so a notebook can free the ports explicitly when it
+    is done with a deck.
+    """
+    global _active
+    lh, _active = _active, None
+    if lh is None:
+        return
+    vis = getattr(lh, "vis", None)
+    for closer in (getattr(vis, "stop", None), getattr(lh, "stop", None)):
+        if closer is None:
+            continue
+        try:
+            await closer()
+        except Exception as exc:  # noqa: BLE001 - teardown must not mask the new setup
+            print(f"[bme590] note: could not cleanly close the previous session ({exc})")
+
+
 async def visualize_deck(
     deck: Deck,
     backend,
@@ -485,6 +524,11 @@ async def visualize_deck(
     Set the environment variable ``BME590_HEADLESS=1`` to skip the visualizer
     entirely (used by headless CI).
     """
+    global _active
+    if _active is not None:
+        print("[bme590] closing the previous visualizer so this one gets the same ports")
+        await close_visualizer()
+
     lh = LiquidHandler(backend=backend, deck=deck)
     if _HEADLESS:
         await lh.setup()
@@ -496,4 +540,5 @@ async def visualize_deck(
     await lh.setup()
     await vis.setup()
     lh.vis = vis  # type: ignore[attr-defined]
+    _active = lh
     return lh
