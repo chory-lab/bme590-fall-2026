@@ -18,7 +18,9 @@ irm https://raw.githubusercontent.com/chory-lab/bme590-fall-2026/main/install.ps
 curl -LsSf https://raw.githubusercontent.com/chory-lab/bme590-fall-2026/main/install.sh | sh
 ```
 
-Takes 1–3 minutes. Re-run it any time to update.
+Takes 1–3 minutes.
+
+> **When it finishes, close that terminal window and open a new one.** The installer puts `uv` on your PATH, but only a *new* terminal reads that — in the window you installed from, `uv run …` still answers `uv: command not found`.
 
 ## Get started
 
@@ -27,32 +29,34 @@ The installer puts the class materials in your **home folder**, which is where a
 - Windows: `C:\Users\<YourName>\bme590-fall-2026`
 - macOS: `/Users/<YourName>/bme590-fall-2026`
 
-The installer's "Next steps" message prints the exact path — use that one if you chose a different folder. From a new terminal, go there and open a workshop:
+The installer's "Next steps" message prints the exact path — use that one if you chose a different folder. From a **new** terminal window (see above), go there and open the first workshop:
 
 **Windows** (PowerShell):
 
 ```powershell
 cd $HOME\bme590-fall-2026
-uv run bme590 start 01
+uv run bme590 start 00
 ```
 
 **Windows** (Command Prompt):
 
 ```bat
 cd %USERPROFILE%\bme590-fall-2026
-uv run bme590 start 01
+uv run bme590 start 00
 ```
 
 **macOS / Linux** (Terminal — Git Bash on Windows is identical):
 
 ```bash
 cd ~/bme590-fall-2026
-uv run bme590 start 01
+uv run bme590 start 00
 ```
 
-This copies workshop 01 into `assignments/`, opens it in VS Code, and selects the kernel. Run `uv run bme590` alone for the full command list.
+This copies workshop 00 into `assignments/`, opens it in VS Code, and selects the kernel. Later workshops are `start 01`, `start 02`, and so on. Run `uv run bme590` alone for the full command list.
 
-You should not have to choose a kernel: the workshops name the class kernel and the installer registered it, so the notebook's top right reads **BME 590 (lab automation)** as soon as it opens. If it reads **Select Kernel** instead, click that, choose **Jupyter Kernel…**, then **BME 590 (lab automation)** — the kernels are one level down, under that heading, not in the first list you see. (VS Code also opens this picker by itself the first time you run a cell without a kernel.)
+Every `uv run bme590` command pulls the latest course materials before it does anything else, so you pick up fixes and new workshops just by working — no reinstall, and nothing in `assignments/` is touched. (`uv run bme590 update` does only that, and reports what happened.)
+
+You should not have to choose a kernel: the workshops name the class kernel and the installer registered it, so the notebook's top right reads **BME 590 (lab automation)** as soon as it opens. If it reads **Select Kernel** instead, click that, choose **Select Another Kernel…** → **Python Environments…**, then pick **BME 590 (lab automation)**. Do *not* choose **Existing Jupyter Server…** — that one asks for a URL like `127.0.0.1` and is not what you want. (VS Code also opens this picker by itself the first time you run a cell without a kernel.)
 
 > Work in `assignments/` and keep it **inside the class folder** — the notebooks load figures by relative path.
 

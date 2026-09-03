@@ -1,10 +1,14 @@
 """The `bme590` command: one entry point for a working session.
 
     uv run bme590              # what to do next, and whether the env is healthy
-    uv run bme590 start 01     # copy workshop 01, open it in VS Code, ready to run
+    uv run bme590 start 00     # copy workshop 00, open it in VS Code, ready to run
     uv run bme590 lab          # same, in JupyterLab instead of VS Code
     uv run bme590 update       # pull the latest materials and match the environment
     uv run bme590 check        # the install doctor
+
+Every command pulls the latest course materials first, so a student who only ever
+runs `bme590 start` still gets the fixes we push mid-semester. `update` exists for
+when that is the only thing you want.
 
 Why this exists: the per-session recipe used to be six manual steps (pull, sync,
 copy the notebook to the right folder, open the folder, pick the interpreter, pick
@@ -108,6 +112,71 @@ def jupyterlab_installed() -> bool:
     """Whether the optional `notebook` group is present in this .venv."""
     launcher = ROOT / ".venv" / ("Scripts/jupyter-lab.exe" if WINDOWS else "bin/jupyter-lab")
     return launcher.exists()
+
+
+def git_env() -> dict[str, str]:
+    """Environment for a git call that must never stop and ask a question.
+
+    A credential or host-key prompt with nothing to answer it reads as a hang.
+    Same reasoning, and the same variables, as scripts/install.py:git_env().
+    """
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "Never"}
+    env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
+    return env
+
+
+def _git(args: list[str], timeout: int) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(
+            ["git", *args], cwd=ROOT, env=git_env(), timeout=timeout,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def pull_latest(*, announce: bool) -> bool:
+    """Fast-forward the course materials. True if new commits arrived.
+
+    Every command does this, not just `update`: material and fixes land
+    mid-semester, and the student who most needs them is the one who never
+    thinks to run `update`. That only works if it is cheap and unfailable --
+    a plane, a captive-portal hotel wifi, or a campus VPN must not stand
+    between a student and their notebook -- so a pull that cannot happen is
+    silent and the command carries on with the copy on disk.
+
+    Set BME590_NO_PULL=1 to skip it (used by the tests, and by anyone grading
+    against a pinned checkout).
+    """
+    if os.environ.get("BME590_NO_PULL"):
+        return False
+    if not (shutil.which("git") and (ROOT / ".git").exists()):
+        return False
+
+    before = _git(["rev-parse", "HEAD"], timeout=10)
+    # --ff-only: a student's local edit to workshops/ must surface as a message
+    # they can act on, never as a merge commit or a conflicted working tree.
+    # 60s, not update's 300: this is in the way of opening a notebook, so an
+    # unreachable remote has to give up while they are still reading the line.
+    result = _git(["pull", "--ff-only"], timeout=60)
+    if result is None:
+        return False  # offline, or git went missing between the check and here
+
+    if result.returncode != 0:
+        # Not fatal on purpose. The notebook they asked for still opens; they
+        # just do it against the materials they already have.
+        print()
+        print("note: could not update the course materials just now.")
+        print("  If this keeps happening, run `uv run bme590 update` to see why.")
+        print("  Your work in assignments/ is safe either way.")
+        print()
+        return False
+
+    after = _git(["rev-parse", "HEAD"], timeout=10)
+    changed = bool(before and after and before.stdout.strip() != after.stdout.strip())
+    if changed and announce:
+        print("updated the course materials to the latest version")
+    return changed
 
 
 def sync_if_needed() -> None:
@@ -221,12 +290,19 @@ def busy_ports() -> list[int]:
 
 
 def cmd_start(args: argparse.Namespace) -> int:
+    # Before listing the workshops as much as before opening one: the list is
+    # wrong too if a workshop was added since this folder was installed.
+    changed = pull_latest(announce=True)
     if not args.workshop:
         return run([python(), "scripts/start_workshop.py"])
 
-    # No sync_if_needed() here: `uv run bme590` has already synced the
-    # environment before this command ran. Syncing again just re-audits the same
-    # lock (cmd_update pulls first, so it is the command that actually needs it).
+    # Sync only when the pull moved: `uv run bme590` already synced the
+    # environment against uv.lock before this command ran, so on the normal
+    # up-to-date path a second sync just re-audits the same lock. A pull that
+    # landed new material is the one case where that audit is stale -- and the
+    # new material is exactly what may need a package this student lacks.
+    if changed:
+        sync_if_needed()
     repair_kernel()
     if run([python(), "scripts/start_workshop.py", args.workshop]) not in (0, 1):
         return 1
@@ -280,8 +356,9 @@ VS Code window."""
 While you work:
   - Run the cells in order. The kernel is already chosen: the notebook's top
     right should read "BME 590 (lab automation)". If it reads "Select Kernel",
-    click it and choose "Jupyter Kernel..." then "BME 590 (lab automation)" --
-    the kernels are one level down, under that heading, not in the first list.
+    click it, choose "Select Another Kernel..." then "Python Environments...",
+    and pick "BME 590 (lab automation)". Do not pick "Existing Jupyter
+    Server..." -- that one asks for a URL and is not what you want.
   - When a cell starts the Visualizer, your browser opens {VISUALIZER_URL}
     and the top right should read "Connected". If it does not, reload that page.
   - Re-running a Visualizer cell leaves the old one running, and your browser
@@ -298,6 +375,7 @@ Stuck? Run:  uv run bme590 check
 
 
 def cmd_lab(args: argparse.Namespace) -> int:
+    pull_latest(announce=True)
     tool = uv()
     if not tool:
         print("uv is not on PATH - reinstall with the command in the README")
@@ -314,27 +392,32 @@ def cmd_lab(args: argparse.Namespace) -> int:
 
 
 def cmd_update(args: argparse.Namespace) -> int:
-    if shutil.which("git") and (ROOT / ".git").exists():
-        print("pulling the latest course materials...")
-        # Never let git stop to ask a question: a credential or host-key prompt
-        # with nothing to answer it reads as a hang. Same reasoning, and the same
-        # variables, as scripts/install.py:git_env().
-        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "Never"}
-        env.setdefault("GIT_SSH_COMMAND", "ssh -oBatchMode=yes")
-        if run(["git", "pull", "--ff-only"], env=env, timeout=300) != 0:
-            print(
-                "\ngit pull did not fast-forward. That usually means you edited files in\n"
-                "workshops/ directly. Your work in assignments/ is safe; ask on Slack\n"
-                "before doing anything else."
-            )
-            return 1
-    else:
+    """The explicit update. Every other command pulls too; this one reports.
+
+    The difference from the automatic pull is what happens when it fails.
+    `start` swallows a failure so the notebook still opens; here the update *is*
+    the task, so a failure is the answer -- with the full git output and the
+    long timeout, because the student is sitting and watching this one.
+    """
+    if not (shutil.which("git") and (ROOT / ".git").exists()):
         print("this copy was downloaded as a zip, so re-run the installer to update the materials")
+        sync_if_needed()
+        return run([python(), "scripts/doctor.py"])
+
+    print("pulling the latest course materials...")
+    if run(["git", "pull", "--ff-only"], env=git_env(), timeout=300) != 0:
+        print(
+            "\ngit pull did not fast-forward. That usually means you edited files in\n"
+            "workshops/ directly, or you are offline. Your work in assignments/ is safe;\n"
+            "if you are online, ask on Slack before doing anything else."
+        )
+        return 1
     sync_if_needed()
     return run([python(), "scripts/doctor.py"])
 
 
 def cmd_check(args: argparse.Namespace) -> int:
+    pull_latest(announce=True)
     # Repair before reporting. The kernel is the one thing doctor used to only
     # complain about, and re-registering it is idempotent and takes about a
     # second -- so a student who runs the command the error message told them to
@@ -348,7 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command")
 
     start = sub.add_parser("start", help="copy a workshop and open it, ready to run")
-    start.add_argument("workshop", nargs="?", help="workshop number, e.g. 01 (omit to list them)")
+    start.add_argument("workshop", nargs="?", help="workshop number, e.g. 00 (omit to list them)")
     start.set_defaults(func=cmd_start)
 
     sub.add_parser("lab", help="work in JupyterLab instead of VS Code").set_defaults(func=cmd_lab)
@@ -359,8 +442,9 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(args, "func", None):
         # Bare `bme590`: orient the student rather than printing usage at them.
         print(f"BME 590 class environment  ({ROOT})\n")
+        pull_latest(announce=True)
         run([python(), "scripts/start_workshop.py"])
-        print("\n  bme590 start 01   open workshop 01 and start working")
+        print("\n  bme590 start 00   open workshop 00 and start working")
         print("  bme590 check      verify the install")
         print("  bme590 update     get the latest materials")
         print("  bme590 lab        work in JupyterLab instead of VS Code")

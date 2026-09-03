@@ -50,7 +50,7 @@ def main(argv: list[str]) -> int:
         for path in available():
             marker = "  (already in assignments/)" if (DEST / path.name).exists() else ""
             print(f"  {path.stem.split('_')[0]}  {path.stem}{marker}")
-        print("\nStart one with, for example:  uv run bme590 start 01")
+        print("\nStart one with, for example:  uv run bme590 start 00")
         return 0
 
     source = resolve(argv[0])

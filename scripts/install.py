@@ -568,7 +568,7 @@ def register_kernel(root: Path) -> None:
         # directly (configure_vscode just pointed it at .venv). Failing the whole
         # install here would send a student with a working setup to Slack.
         say("could not register the Jupyter kernel - the rest of the environment is fine.")
-        say("`uv run bme590 start 01` tries again every time it runs; if VS Code asks")
+        say("`uv run bme590 start 00` tries again every time it runs; if VS Code asks")
         say('which kernel to use, pick the one under ".venv" in this folder.')
         return
     ok('kernel "BME 590 (lab automation)" available')
@@ -584,18 +584,23 @@ def next_steps(root: Path) -> str:
 =================================================
  Done. Next steps:
 =================================================
-  1. Open a new {shell} window, then run this command to go to the class folder:
+  1. CLOSE this {shell} window and open a NEW one.
+     Do not skip this. Only a NEW window knows where `uv` is; in this one,
+     every command below answers "uv: command not found".
+  2. In that new window, go to the class folder:
        cd {location}
-  2. Run this command to copy the workshop and open it in VS Code:
-       uv run bme590 start 01
+  3. Copy the first workshop and open it in VS Code:
+       uv run bme590 start 00
      (your copy lands in assignments, where class updates cannot overwrite it)
-  3. The notebook's top right should already read "BME 590 (lab automation)".
-     Nothing to pick -- the workshops name that kernel, and step 1 registered it.
-     If it says "Select Kernel" instead, click it and choose
-     "Jupyter Kernel..." -> "BME 590 (lab automation)".
+  4. The notebook's top right should already read "BME 590 (lab automation)".
+     Nothing to pick -- the workshops name that kernel, and step 3 registered it.
+     If it says "Select Kernel" instead, click it, choose
+     "Select Another Kernel..." -> "Python Environments...", and pick
+     "BME 590 (lab automation)". Not "Existing Jupyter Server...", which asks
+     for a URL.
 
-If anything ever looks wrong:  uv run bme590 check
-To update the course materials later, run the installer again.
+Every `uv run bme590` command pulls the latest course materials first, so you
+stay up to date just by working. If anything ever looks wrong:  uv run bme590 check
 """
 
 
