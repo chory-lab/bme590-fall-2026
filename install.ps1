@@ -83,9 +83,50 @@ function Add-ToUserPath ($dir) {
   $env:Path = "$dir;$env:Path"
 }
 
+# uv's own installer refuses to run under a Restricted or AllSigned policy:
+# "PowerShell requires an execution policy in [Unrestricted, RemoteSigned,
+# ByPass] to run uv". Windows ships Restricted on some editions and school IT
+# images set it on others, so this is a first-day blocker, not an edge case.
+#
+# The fix is per-process, not per-machine: -Scope Process lasts exactly as long
+# as this window and leaves the saved policy untouched, so nothing here loosens
+# a security setting that outlives the install. A machine whose policy comes
+# from Group Policy cannot be relaxed even that far -- Set-ExecutionPolicy does
+# not fail there, it simply does not take -- which is why this re-reads the
+# effective policy instead of trusting the call.
+function Approve-ExecutionPolicyForUv {
+  $allowed = @('Unrestricted', 'RemoteSigned', 'Bypass')
+  if ($allowed -contains (Get-ExecutionPolicy).ToString()) { return $true }
+  try {
+    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force -ErrorAction Stop
+  } catch {
+    return $false
+  }
+  if ($allowed -contains (Get-ExecutionPolicy).ToString()) {
+    Write-Host '  relaxed the execution policy for THIS WINDOW ONLY (your saved setting is unchanged)'
+    return $true
+  }
+  return $false
+}
+
 $uv = Find-Uv
 if (-not $uv) {
   Write-Host '  not found - installing it (per-user, no administrator rights needed)'
+  if (-not (Approve-ExecutionPolicyForUv)) {
+    Die @"
+PowerShell's execution policy is '$(Get-ExecutionPolicy)', and uv's installer will
+not run under it. This window could not be relaxed on its own, which usually means
+the policy comes from your school's Group Policy.
+
+Run this once, then run the install command again:
+
+    Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
+
+If that is refused too, the machine is managed and IT has to allow it -- or take
+the manual route: download uv from https://github.com/astral-sh/uv/releases, put
+uv.exe somewhere on your PATH, and run the install command again.
+"@
+  }
   try {
     Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
   } catch {
