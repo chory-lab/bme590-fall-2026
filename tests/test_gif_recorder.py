@@ -114,11 +114,25 @@ async def test_a_recording_spans_calls(connected):
 # --- the watchdog ----------------------------------------------------------
 
 
+async def wait_for_stop(connected, timeout=5.0):
+    """Wait until the watchdog's stop() has actually sent its command.
+
+    A fixed sleep would encode the flush stop() performs before sending, which
+    is tuned to the page's frame timer and has changed once already; these
+    tests are about the watchdog firing, not about how long the flush is.
+    """
+    deadline = asyncio.get_event_loop().time() + timeout
+    while "class_stop_gif" not in connected.events:
+        if asyncio.get_event_loop().time() > deadline:
+            raise AssertionError(f"watchdog never finalized; saw {connected.events}")
+        await asyncio.sleep(0.05)
+
+
 async def test_watchdog_finalizes_a_forgotten_recording(connected, capsys):
     """A forgotten stop() should cost a short GIF, not the whole recording."""
     rec = gif_recorder(connected.vis, name="forgotten.gif", max_duration=0.05)
     await rec.start()
-    await asyncio.sleep(0.4)
+    await wait_for_stop(connected)
 
     assert connected.events == ["class_start_gif", "class_stop_gif"]
     assert connected.data_for("class_stop_gif") == {"filename": "forgotten.gif"}
@@ -131,8 +145,7 @@ async def test_watchdog_does_not_cancel_its_own_stop(connected):
     and the recording would be lost -- the bug the detach guards against."""
     rec = gif_recorder(connected.vis, max_duration=0.05)
     await rec.start()
-    await asyncio.sleep(0.4)
-    assert "class_stop_gif" in connected.events
+    await wait_for_stop(connected)
     assert rec._watchdog is None
 
 

@@ -388,8 +388,15 @@ class GifRecorder:
         if self._watchdog is not None:
             self._watchdog.cancel()
             self._watchdog = None
-        # Let the last state push flush before capturing stops.
-        await asyncio.sleep(max(0.3, _step_delay * 0.5))
+        # Let the last state push flush before capturing stops. The page
+        # captures on a timer (max(200, frame_interval * 50) ms), so a flush
+        # shorter than a couple of those ticks can end the recording before the
+        # final deck state is ever photographed -- measured in Chromium: a
+        # 9-change protocol landed 5 frames with the old 0.5s flush and 9 once
+        # the finished deck was held. Since the last state is the one students
+        # submit, wait out two frame intervals at minimum.
+        frame_seconds = max(0.2, self.frame_interval * 0.05)
+        await asyncio.sleep(max(0.3, _step_delay * 0.5, frame_seconds * 2))
         await self.vis.send_command("class_stop_gif", {"filename": self.name})
 
     async def _auto_stop(self) -> None:
@@ -498,8 +505,12 @@ async def close_visualizer() -> None:
             continue
         try:
             await closer()
-        except Exception as exc:  # noqa: BLE001 - teardown must not mask the new setup
-            print(f"[bme590] note: could not cleanly close the previous session ({exc})")
+        except Exception:  # noqa: BLE001, S110 - teardown must not mask the new setup
+            # Routinely raises when the tab is already gone: closing a socket
+            # whose peer has left reports "1001 (going away)". That is the
+            # normal path after a student closes the visualizer tab, so it is
+            # not worth a line of output that reads like something went wrong.
+            pass
 
 
 async def visualize_deck(
