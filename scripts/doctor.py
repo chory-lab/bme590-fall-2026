@@ -44,6 +44,80 @@ def load_checker():
     return module
 
 
+def vscode_cli() -> str | None:
+    """The VS Code CLI, wherever it lives.
+
+    A third copy of the same lookup (scripts/install.py, bme590/cli.py). Each
+    file is standalone on purpose -- this one runs before the package is
+    importable -- so the duplication is the price of that.
+    """
+    import shutil
+
+    on_path = shutil.which("code")
+    if on_path:
+        return on_path
+    if sys.platform == "darwin":
+        candidates = [
+            Path("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"),
+            Path.home() / "Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+        ]
+    elif os.name == "nt":
+        candidates = [
+            Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Microsoft VS Code/bin/code.cmd",
+            Path(os.environ.get("ProgramFiles", "")) / "Microsoft VS Code/bin/code.cmd",
+            Path(os.environ.get("ProgramFiles(x86)", "")) / "Microsoft VS Code/bin/code.cmd",
+        ]
+    else:
+        candidates = [Path("/usr/share/code/bin/code"), Path("/snap/bin/code"), Path("/usr/bin/code")]
+    for candidate in candidates:
+        try:
+            if candidate.is_file():
+                return str(candidate)
+        except OSError:
+            continue
+    return None
+
+
+def check_vscode_extensions(warnings: list[str]) -> None:
+    """Report whether the two extensions the workshops need are installed.
+
+    A warning, never a problem: the environment runs notebooks perfectly well
+    without VS Code, and `bme590 lab` does not involve it at all. It is here
+    because "failed to install the Python extension" is otherwise something a
+    student can only report from memory -- this turns it into a line they can
+    paste, and says which of the two extensions is actually missing.
+    """
+    import subprocess
+
+    code = vscode_cli()
+    if code is None:
+        print("vscode       not found (fine if you use JupyterLab: uv run bme590 lab)")
+        return
+    try:
+        result = subprocess.run([code, "--list-extensions"], capture_output=True, text=True,
+                                encoding="utf-8", errors="replace", timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"vscode       found, but could not list extensions ({exc})")
+        return
+    if result.returncode != 0:
+        print(f"vscode       found, but `code --list-extensions` failed (exit {result.returncode})")
+        return
+
+    installed = {line.strip().lower() for line in result.stdout.splitlines() if line.strip()}
+    needed = {"ms-python.python": "Python", "ms-toolsai.jupyter": "Jupyter"}
+    missing = [name for ext, name in needed.items() if ext not in installed]
+    if missing:
+        print(f"vscode       MISSING extension(s): {', '.join(missing)}")
+        warnings.append(
+            f"VS Code is missing the {' and '.join(missing)} extension(s). Notebooks will not run "
+            "in VS Code without them. Install from the Extensions panel; if that fails, the two "
+            "usual causes are a VS Code too old for the current extension (Help > Check for "
+            "Updates) and a network that blocks the marketplace (campus wifi, VPN, proxy)."
+        )
+    else:
+        print("vscode       Python and Jupyter extensions installed")
+
+
 def report_environment() -> tuple[list[str], list[str]]:
     """Print what a support request needs, and sort what is wrong into two lists.
 
@@ -184,6 +258,8 @@ def report_environment() -> tuple[list[str], list[str]]:
     if os.environ.get("CONDA_DEFAULT_ENV"):
         print(f"note         conda environment '{os.environ['CONDA_DEFAULT_ENV']}' is active in this shell;")
         print("             use `uv run python ...` so you get the class environment")
+
+    check_vscode_extensions(warnings)
 
     return problems, warnings
 

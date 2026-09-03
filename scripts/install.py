@@ -546,12 +546,34 @@ def configure_vscode(root: Path) -> None:
         say('then add the "Python" and "Jupyter" extensions from the Extensions panel.')
         return
     for extension in ("ms-python.python", "ms-toolsai.jupyter"):
+        # Captured, not discarded. "Failed to install the Python extension" is a
+        # message students bring to office hours with nothing attached to it,
+        # and the CLI already knows which of the two usual causes it was; the
+        # old DEVNULL threw that away and offered the same generic advice for
+        # both.
         result = run([code, "--install-extension", extension, "--force"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                     capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode == 0:
             ok(f"VS Code extension {extension}")
+            continue
+
+        detail = " ".join((result.stdout or "") .split() + (result.stderr or "").split())
+        say(f"could not install {extension}")
+        lowered = detail.lower()
+        if "not compatible" in lowered or "incompatible" in lowered:
+            # The marketplace serves the newest build, which requires a recent
+            # VS Code. An editor a year out of date fails here every time and
+            # will keep failing from the Extensions panel too.
+            say("  your VS Code is too old for the current version of this extension.")
+            say("  Update VS Code (Help > Check for Updates), then re-run this installer.")
+        elif any(word in lowered for word in ("getaddrinfo", "econn", "etimedout", "enotfound",
+                                              "certificate", "proxy", "network", "socket")):
+            say("  the marketplace could not be reached - campus wifi, a VPN, or a proxy.")
+            say("  Try another network, then re-run this installer.")
         else:
-            say(f"could not install {extension} - add it from the Extensions panel")
+            say("  add it from the Extensions panel in VS Code (search for its name).")
+        if detail:
+            say(f"  VS Code said: {detail[:300]}")
 
 
 # ----------------------------------------------------------------------- main
