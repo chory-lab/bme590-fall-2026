@@ -505,12 +505,126 @@ def find_code() -> str | None:
     return None
 
 
+WORKSPACE_FILE = "bme590.code-workspace"
+
+
+def interpreter_path() -> str:
+    return "${workspaceFolder}\\.venv\\Scripts\\python.exe" if WINDOWS else "${workspaceFolder}/.venv/bin/python"
+
+
+# Pylance replaces this array wholesale rather than merging into it, so its own
+# defaults are restated here; dropping them would quietly de-index scipy and
+# friends as the price of indexing ours.
+PYLANCE_PACKAGE_DEPTHS = [
+    {"name": "sklearn", "depth": 2},
+    {"name": "matplotlib", "depth": 2},
+    {"name": "scipy", "depth": 2},
+    {"name": "django", "depth": 4},
+    {"name": "flask", "depth": 2},
+    {"name": "fastapi", "depth": 2},
+    {"name": "cuda", "depth": 3, "includeAllSymbols": True},
+    # Ours. Pylance indexes an unlisted package one level deep, which for
+    # PyLabRobot is the top-level `pylabrobot` module and nothing else -- so
+    # Ctrl+T and completions know none of the 684 names that `pylabrobot.
+    # resources` re-exports, and every labware lookup falls back to a text
+    # search. Depth 4 reaches the modules that define them
+    # (pylabrobot.resources.corning.plates); includeAllSymbols because
+    # `pylabrobot.resources` declares no `__all__`, and without it Pylance has
+    # nothing to go on.
+    {"name": "pylabrobot", "depth": 4, "includeAllSymbols": True},
+]
+
+
+def class_settings(root: Path, interpreter: str) -> dict:
+    """The editor settings this class needs, shared by both files that carry them."""
+    return {
+        "python.defaultInterpreterPath": interpreter,
+        "python.terminal.activateEnvironment": True,
+        "jupyter.kernels.filter": [],
+        # Trust the kernelspec baked into each notebook (name: bme590)
+        # instead of prompting students to pick one -- the prompt is where
+        # wrong-environment selections happen.
+        "jupyter.askForKernelSelection": False,
+        "python.analysis.packageIndexDepths": PYLANCE_PACKAGE_DEPTHS,
+        # Off by default in Pylance. On, typing `cor_96` in a cell offers the
+        # plate and writes the `from pylabrobot.resources import ...` line with
+        # it, which is the fastest labware lookup in the editor and the one that
+        # does not require knowing where PyLabRobot keeps anything.
+        "python.analysis.autoImportCompletions": True,
+    }
+
+
+def pylabrobot_dir(root: Path) -> "Path | None":
+    """Where pip put pylabrobot in this venv, asked of the venv itself.
+
+    Not constructed from a guess: that folder is `Lib/site-packages` on Windows
+    and `lib/python3.11/site-packages` elsewhere, and the version in that path
+    moves whenever .python-version does. The interpreter that imports it knows,
+    so ask it.
+    """
+    try:
+        result = run(
+            [venv_python(root), "-c",
+             "import pylabrobot, os; print(os.path.dirname(pylabrobot.__file__))"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+    except OSError:  # no interpreter there at all -- nothing to point a workspace at
+        return None
+    if result.returncode != 0:
+        return None
+    package = Path((result.stdout or "").strip())
+    return package if package.is_dir() else None
+
+
+def write_workspace(root: Path) -> None:
+    """Add PyLabRobot's source as a second folder root in a VS Code workspace.
+
+    PyLabRobot used to sit beside the workshops at the top level, where
+    Ctrl+Shift+F found it and students could read the labware definitions the
+    exercises ask them to use. Installed into .venv it is invisible: .venv is in
+    .gitignore, VS Code search honours .gitignore, and no `search.exclude` entry
+    can re-include a path a .gitignore already dropped -- which is why this is a
+    workspace file and not one more settings key.
+
+    A second folder root is searched on its own terms, so PyLabRobot returns to
+    Ctrl+Shift+F and to the Explorer as a browsable tree, while .venv stays the
+    single installed copy: nothing is cloned, nothing can drift from uv.lock,
+    and the source a student reads is the code they are actually running.
+    """
+    package = pylabrobot_dir(root)
+    if package is None:
+        say("could not locate the installed pylabrobot - skipping the workspace file")
+        say("(the environment is fine; PyLabRobot just will not show up in Ctrl+Shift+F)")
+        return
+    try:
+        location = package.relative_to(root).as_posix()
+    except ValueError:  # a venv outside the course folder: absolute is still valid
+        location = package.as_posix()
+    workspace = {
+        "folders": [
+            {"path": "."},
+            {"name": "pylabrobot (library source - read only)", "path": location},
+        ],
+        # Duplicated from .vscode/settings.json on purpose: with a .code-workspace
+        # open, workspace settings are what apply, so a student who opens the
+        # workspace must not thereby lose the interpreter this installer picked.
+        #
+        # Absolute, not ${workspaceFolder}: that variable is ambiguous once there
+        # is more than one folder root, where VS Code wants ${workspaceFolder:Name}
+        # and the name is the student's own directory, which differs per machine.
+        # This file is generated per machine anyway, so spell the path out.
+        "settings": class_settings(root, str(venv_python(root))),
+    }
+    (root / WORKSPACE_FILE).write_text(json.dumps(workspace, indent=2) + "\n", encoding="utf-8")
+    ok(f"{WORKSPACE_FILE} written - PyLabRobot's source is in Ctrl+Shift+F")
+
+
 def configure_vscode(root: Path) -> None:
     # The step students most often got wrong by hand: the old README walked them
     # through Python: Select Interpreter. Writing it removes the choice.
     settings_dir = root / ".vscode"
     settings_dir.mkdir(exist_ok=True)
-    interpreter = "${workspaceFolder}\\.venv\\Scripts\\python.exe" if WINDOWS else "${workspaceFolder}/.venv/bin/python"
+    interpreter = interpreter_path()
 
     # Merge, do not replace. Re-running the installer is the advertised fix for
     # everything, and it should not be the thing that silently deletes a font
@@ -525,17 +639,11 @@ def configure_vscode(root: Path) -> None:
                 settings = existing
         except (OSError, ValueError):
             say("the existing .vscode/settings.json is not readable JSON - replacing it")
-    settings.update({
-        "python.defaultInterpreterPath": interpreter,
-        "python.terminal.activateEnvironment": True,
-        "jupyter.kernels.filter": [],
-        # Trust the kernelspec baked into each notebook (name: bme590)
-        # instead of prompting students to pick one -- the prompt is where
-        # wrong-environment selections happen.
-        "jupyter.askForKernelSelection": False,
-    })
+    settings.update(class_settings(root, interpreter))
     settings_file.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
     ok(".vscode/settings.json written")
+
+    write_workspace(root)
 
     # Skipped, not failed, when the `code` CLI is absent: VS Code offers these
     # itself on first opening a notebook, and a missing editor must not fail an
@@ -624,6 +732,11 @@ def next_steps(root: Path) -> str:
 
 Every `uv run bme590` command pulls the latest course materials first, so you
 stay up to date just by working. If anything ever looks wrong:  uv run bme590 check
+
+Looking up labware? Step 3 opens {WORKSPACE_FILE}, which carries PyLabRobot's
+own source as a second folder in the Explorer, so Ctrl+Shift+F searches the
+library too -- search cor_96_wellplate to see every Corning plate it defines.
+F12 on any name in your notebook jumps straight to its definition there.
 """
 
 

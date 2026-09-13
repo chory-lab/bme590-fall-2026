@@ -331,7 +331,15 @@ def cmd_start(args: argparse.Namespace) -> int:
         # window makes the workspace deterministic. The cost is a second window
         # when the folder is already open, which is a visible annoyance rather
         # than a silently wrong environment.
-        run([code, "-n", str(ROOT), str(notebook)])
+        #
+        # The workspace file, when the installer wrote one, in place of the bare
+        # folder: it is the same folder plus PyLabRobot's installed source as a
+        # second root, which is what puts the labware definitions back into
+        # Ctrl+Shift+F. Falling back to the folder keeps an older install (or a
+        # checkout that never ran the installer) working unchanged.
+        workspace = ROOT / "bme590.code-workspace"
+        target = workspace if workspace.exists() else ROOT
+        run([code, "-n", str(target), str(notebook)])
         print(f"\nOpened {notebook.relative_to(ROOT)} in VS Code.")
     else:
         print(f"\nYour copy is at {notebook.relative_to(ROOT)}")

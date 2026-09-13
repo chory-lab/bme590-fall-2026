@@ -1,6 +1,10 @@
 __pycache__/
 *.egg-info
 .vscode
+# Written per machine by scripts/install.py: the class folder plus the
+# installed pylabrobot as a second folder root, so its source is searchable.
+# Machine-specific (it holds an absolute interpreter path), so never committed.
+bme590.code-workspace
 .DS_Store
 assignments/
 cookbook/_site/
