@@ -192,11 +192,25 @@ def neutralize(src):
         "    yield _Rec()\n"
         "async def step(m=1.0): pass\n"
         "def set_step_delay(s): pass\n"
+        # The shim mirrors bme590.visualizer_ext's lifecycle contract, not just
+        # its signatures: one session at a time, closed before the next opens,
+        # and `close_visualizer` exported. A shim that only faked the signatures
+        # is why CI passed a workshop 01 that opened ten visualizers and closed
+        # none -- the leak lived in the helper CI was replacing.
+        "_active_lh = None\n"
+        "async def close_visualizer():\n"
+        "    global _active_lh\n"
+        "    lh, _active_lh = _active_lh, None\n"
+        "    if lh is not None and lh.setup_finished:\n"
+        "        await lh.stop()\n"
         "async def visualize_deck(deck, backend, **kw):\n"
+        "    global _active_lh\n"
         "    from pylabrobot.liquid_handling import LiquidHandler\n"
+        "    await close_visualizer()\n"
         "    lh = LiquidHandler(backend=backend, deck=deck)\n"
         "    await lh.setup()\n"
         "    lh.vis = None\n"
+        "    _active_lh = lh\n"
         "    return lh\n"
     )
     src = re.sub(

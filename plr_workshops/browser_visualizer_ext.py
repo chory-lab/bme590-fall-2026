@@ -19,6 +19,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 __all__ = [
+    "close_visualizer",
     "gif_recorder",
     "gif_recording",
     "step",
@@ -74,6 +75,42 @@ async def step(multiplier: float = 1.0) -> None:
     """Browser no-op: there is no desktop event loop to pace."""
 
 
+# The session this kernel last created, mirroring the desktop module's
+# singleton. There are no ports to collide in Pyodide, but the lifecycle the
+# workshops teach -- one live session, closed before the next opens -- has to
+# hold here too, or the hosted site quietly exercises a lifecycle the students
+# are told they are not taking. Without it workshop 01 built ten LiquidHandlers
+# and stopped none.
+_active = None
+
+
+async def close_visualizer() -> None:
+    """Close the current session, if there is one.
+
+    The browser counterpart of :func:`bme590.visualizer_ext.close_visualizer`.
+    Every workshop imports this name and calls it to finish, so it must exist
+    here even though there is no websocket or file server to release: an
+    ImportError in the first setup cell would take down the whole notebook.
+    """
+    global _active
+    lh, _active = _active, None
+    if lh is None:
+        return
+    vis = getattr(lh, "vis", None)
+    closers = [getattr(vis, "stop", None)]
+    # Matches the desktop module: `LiquidHandler.stop()` raises RuntimeError on
+    # an already-stopped handler, so it is only called when setup finished.
+    if getattr(lh, "setup_finished", False):
+        closers.append(lh.stop)
+    for closer in closers:
+        if closer is None:
+            continue
+        try:
+            await closer()
+        except Exception:  # noqa: BLE001, S110 - teardown must not mask the new setup
+            pass
+
+
 async def visualize_deck(
     deck,
     backend,
@@ -91,9 +128,14 @@ async def visualize_deck(
 
     from plr_workshops.jupyterlite_bridge import BrowserVisualizer
 
+    global _active
+    if _active is not None:
+        await close_visualizer()
+
     lh = LiquidHandler(backend=backend, deck=deck)
     await lh.setup()
     vis = BrowserVisualizer(resource=lh)
     await vis.setup()
     lh.vis = vis  # type: ignore[attr-defined]
+    _active = lh
     return lh

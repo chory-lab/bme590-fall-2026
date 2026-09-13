@@ -1,12 +1,15 @@
 """Only one visualizer session may be live at a time.
 
 A notebook calls ``visualize_deck()`` more than once -- workshop 00 does it
-twice by design, and a student does it again after every mistake. PLR's file
-server does not move off port 1337 when that port is already taken, so a second
-session used to leave the browser reading the *first* session's page: the page
-kept advertising ws 2121 while the notebook recorded ws 2122, and
-``rec.start()`` then waited out its full 60s timeout for a connection that
-could not arrive. These tests pin the teardown that prevents it.
+twice by design, workshop 01 ten times, and a student does it again after every
+mistake. Each call used to orphan the previous session's websocket server:
+``Visualizer.stop()`` ends the serve loop only ``if self.has_connection()``, so
+a session whose tab the student had closed stayed bound and stayed live. The
+student's first tab went on rendering the first deck while the notebook drove
+the second, and a recording started against that tab waited out its full 60s.
+
+This is a single-notebook failure -- it needs no second kernel -- and these
+tests pin the teardown that prevents it.
 """
 
 import socket
@@ -33,6 +36,22 @@ def free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
+
+
+def port_is_bound(port: int) -> bool:
+    """True while something still holds the port.
+
+    A released websocket server is the whole point of the teardown, and the
+    only way to observe it from outside the visualizer is to try to take the
+    port back.
+    """
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(("127.0.0.1", port))
+            return False
+        except OSError:
+            return True
 
 
 def served_ws_port(lh) -> str:
@@ -91,3 +110,62 @@ async def test_close_survives_a_session_that_cannot_be_stopped():
     lh.vis.stop = boom
     await close_visualizer()
     assert visualizer_ext._active is None
+
+
+async def test_repeated_sessions_do_not_leak_websocket_servers():
+    """The classroom regression, in the shape a workshop actually runs.
+
+    No tab is ever attached here, which is the case `Visualizer.stop()` gets
+    wrong and the normal one for a student who closed the dead tab. Before
+    `_release_websocket`, four calls climbed ws 2121->2124 and left all four
+    bound; the live 2121 is what kept the student's first tab showing a deck
+    the notebook had stopped driving.
+    """
+    ports = {"fs_port": free_port(), "ws_port": free_port()}
+    used = []
+    for _ in range(4):
+        lh = await visualize_deck(STARLetDeck(), LiquidHandlerChatterboxBackend(),
+                                  open_browser=False, **ports)
+        assert not lh.vis.has_connection(), "test must exercise the no-tab path"
+        used.append(lh.vis.ws_port)
+
+    # Every call reuses the one port, because each close actually released it.
+    assert used == [ports["ws_port"]] * 4, f"websocket port drifted: {used}"
+
+    await close_visualizer()
+    for port in set(used):
+        assert not port_is_bound(port), f"ws {port} still bound after close"
+
+
+async def test_close_releases_the_websocket_with_no_tab_attached():
+    """`stop()` alone leaves the serve loop running; teardown must not."""
+    ws = free_port()
+    lh = await visualize_deck(STARLetDeck(), LiquidHandlerChatterboxBackend(),
+                              open_browser=False, fs_port=free_port(), ws_port=ws)
+    assert port_is_bound(ws)
+    await close_visualizer()
+    assert not port_is_bound(ws)
+
+
+async def test_close_stops_a_handler_only_once():
+    """`LiquidHandler.stop()` raises on an already-stopped handler.
+
+    Teardown used to call it unconditionally and swallow the RuntimeError,
+    which is the habit this module exists to stop teaching. Asserting no
+    exception escapes is not enough -- the old code passed that too -- so this
+    checks the handler is actually stopped and not stopped twice.
+    """
+    lh = await visualize_deck(STARLetDeck(), LiquidHandlerChatterboxBackend(),
+                              open_browser=False, fs_port=free_port(), ws_port=free_port())
+    calls = []
+    real_stop = lh.stop
+
+    async def counting_stop():
+        calls.append(1)
+        await real_stop()
+
+    lh.stop = counting_stop
+    await close_visualizer()
+    await close_visualizer()
+    assert calls == [1], f"handler stopped {len(calls)} times"
+    assert not lh.setup_finished

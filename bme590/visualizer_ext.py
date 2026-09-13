@@ -477,15 +477,53 @@ _HEADLESS = os.environ.get("BME590_HEADLESS", "").lower() in {"1", "true", "yes"
 
 # The visualizer session this process last created, if it is still up.
 # Notebooks call visualize_deck() more than once -- workshop 00 does it twice by
-# design, and every student does it again after a mistake -- and the second call
-# used to leave the first one running. That is not merely untidy: PLR's file
-# server does not move off port 1337 when it is taken, so the page a student
-# opens keeps advertising the FIRST visualizer's websocket port. The browser
-# then talks to the old session while the notebook records the new one, and
-# `rec.start()` waits 60s for a connection that cannot arrive. Verified against
-# pylabrobot 0.2.2: a second setup lands on ws 2122 while the served page still
-# says 2121.
+# design, workshop 01 ten times, and every student does it again after a
+# mistake -- and the second call used to leave the first one running.
+#
+# The damage is not the served page: PLR 0.2.2 increments both ports on a
+# collision (visualizer.py:503 and :588), and `setup()` blocks until the
+# websocket has actually bound before the file server captures `ws_port`, so
+# the page always advertises the port the notebook is really driving.
+#
+# The damage is the *orphaned websocket server*. `Visualizer.stop()` resolves
+# the future that ends the serve loop only `if self.has_connection()`, so a
+# session whose tab the student already closed is never actually torn down --
+# see `_release_websocket` below. That old server stays bound and stays live,
+# which means the student's FIRST tab keeps rendering the FIRST deck while the
+# notebook drives the second. The deck on screen simply stops matching the
+# code, and a recording started against it waits out its full 60s.
+#
+# Measured against pylabrobot 0.2.2, four `visualize_deck()` calls in one
+# kernel with no tab attached: ws 2121, 2122, 2123, 2124, all four still bound
+# after `close_visualizer()`. With `_release_websocket` every call reuses 2121
+# and nothing is left bound. This is a single-notebook bug; it needs no second
+# kernel.
 _active: "LiquidHandler | None" = None
+
+
+def _release_websocket(vis) -> None:
+    """Make the websocket server actually shut down when no tab is attached.
+
+    `Visualizer.stop()` in pylabrobot 0.2.2 resolves the future that ends the
+    websocket serve loop only inside `if self.has_connection():`. With no
+    browser attached -- the student closed the tab, which is the common case
+    here -- the loop keeps running and ws 2121 stays bound, while `stop()` goes
+    on to clear `_loop`/`_t` so nothing can release it afterwards. The next
+    visualizer then lands on 2122 while the page served from 1337 still says
+    2121, which is the exact failure the singleton above exists to prevent.
+
+    Resolving the future first covers the disconnected case; `stop()` handles
+    the connected one itself. getattr-guarded so a fixed PyLabRobot makes this
+    a no-op.
+    """
+    loop = getattr(vis, "_loop", None)
+    future = getattr(vis, "_stop_", None)
+    if loop is None or future is None or future.done():
+        return
+    try:
+        loop.call_soon_threadsafe(future.set_result, "done")
+    except (RuntimeError, asyncio.InvalidStateError):  # loop gone, or already resolved
+        pass
 
 
 async def close_visualizer() -> None:
@@ -500,7 +538,16 @@ async def close_visualizer() -> None:
     if lh is None:
         return
     vis = getattr(lh, "vis", None)
-    for closer in (getattr(vis, "stop", None), getattr(lh, "stop", None)):
+    if vis is not None and not vis.has_connection():
+        _release_websocket(vis)
+    closers = [getattr(vis, "stop", None)]
+    # `LiquidHandler.stop()` is not idempotent -- on an already-stopped handler
+    # it raises RuntimeError("The setup has not finished"). The except below
+    # would swallow that, but a teardown whose correctness rests on catching its
+    # own predictable error is the thing this module is meant to stop teaching.
+    if getattr(lh, "setup_finished", False):
+        closers.append(lh.stop)
+    for closer in closers:
         if closer is None:
             continue
         try:
@@ -544,6 +591,12 @@ async def visualize_deck(
     if _HEADLESS:
         await lh.setup()
         lh.vis = None  # type: ignore[attr-defined]
+        # Registered even with no visualizer to close: the handler still needs
+        # stopping, and `close_visualizer()` is what the notebooks call to do it.
+        # Returning early without this leaked a set-up LiquidHandler per deck in
+        # CI -- harmless with a chatterbox backend, but it meant the headless run
+        # exercised a lifecycle the students never take.
+        _active = lh
         return lh
     vis = RecordingVisualizer(
         resource=lh, open_browser=open_browser, declutter=declutter, **vis_kwargs
