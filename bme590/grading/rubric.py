@@ -249,16 +249,101 @@ await check("02.1b transfers", _protocol1)
         },
         {
             "id": "02.3",
-            "points": 40,
+            "points": 20,
+            "ask": "OT-2 deck (4 stock troughs, 2 deep plates, 2+2 tip racks), 1.2x diluent, "
+                   "480 uL of each dye in the first column of its band",
+            "source": r"""
+async def _dilution_deck():
+    d = await deck_exercise_3()
+    problems = []
+    # The prompt names the deck, so the deck is fair to check; slot assignment
+    # ("most -> least sterile") is not, and is graded by eye.
+    if "OT" not in type(d).__name__:
+        problems.append(f"expected an Opentrons deck, got {type(d).__name__}")
+    # Structural, not by name: a stock trough is a vessel that holds 100 mL,
+    # a dilution plate is 96 wells of >= 2 mL.
+    troughs = [p for p in D.plates(d)
+               if p.num_items <= 12 and p.get_item(0).max_volume >= 100_000]
+    if len(troughs) < 4:
+        problems.append(f"expected 4 reservoirs holding 100 mL each, found {len(troughs)}")
+    deep = [p for p in D.plates(d) if p.num_items == 96 and p.get_item(0).max_volume >= 2000]
+    if len(deep) < 2:
+        problems.append(f"expected 2 96-deep-well plates, found {len(deep)}")
+    caps = [t.get_item(0).tracker.get_tip().maximal_volume for t in D.tip_racks(d)]
+    if sum(1 for c in caps if c >= 1000) < 2:
+        problems.append("expected 2 boxes of 1000 uL tips")
+    if sum(1 for c in caps if 200 <= c < 1000) < 2:
+        problems.append("expected 2 boxes of 300 uL tips")
+    return (not problems), "; ".join(problems)
+await check("02.3a deck contents", _dilution_deck)
+
+def _diluent_volume():
+    # 11 steps x 420 uL x 3 replicates x 3 colours, x 1.2. The value is checked,
+    # not the arithmetic that produced it, so any correct route passes.
+    want = 1.2 * 3 * 3 * 11 * 420
+    got = float(DILUENT_VOLUME)
+    if not D.close(got, want, want * 0.02):
+        return False, (f"DILUENT_VOLUME is {got:.0f} uL, which is not 1.2x the diluent "
+                       "11 dilution steps in triplicate across three colours consume")
+    return True, ""
+await check("02.3b diluent volume", _diluent_volume)
+
+async def _stocks():
+    # Build and run here rather than reading the notebook's globals: by the time
+    # the probe runs, `deck` belongs to exercise 4.
+    global deck, lh
+    deck = await deck_exercise_3()
+    lh = await visualize_deck(deck, LiquidHandlerChatterboxBackend())
+    await run_protocol_exercise_3(deck, lh)
+
+    ps = [p for p in D.plates(deck) if p.num_items == 96]
+    ps.sort(key=lambda p: (D.slot_of(deck, p) is None, D.slot_of(deck, p)))
+    if len(ps) < 2:
+        return False, f"expected at least 2 dilution plates, found {len(ps)}"
+    problems = []
+    for plate, rows, label in ((ps[0], "ABC", "red"), (ps[0], "EFG", "blue"),
+                               (ps[1], "ABC", "yellow")):
+        vols = D.volumes_by_id(plate)
+        for row in rows:
+            got = vols.get(f"{row}1", 0.0)
+            if not D.close(got, 480.0, 5.0):
+                problems.append(f"{label} {row}1 holds {got:.0f} uL, expected 480")
+        # Nothing but the stock column should have been touched yet.
+        spilled = [w for w, v in vols.items() if v > 1.0 and w[1:] != "1"]
+        if spilled:
+            problems.append(f"{label}: liquid outside column 1 ({len(spilled)} well(s))")
+    return (not problems), "; ".join(problems[:4])
+await check("02.3c stock columns", _stocks)
+""",
+        },
+        {
+            "id": "02.4",
+            "points": 20,
             "ask": "12-point 1:7 serial dilutions in triplicate: red A-C plate 1, blue E-G plate 1, yellow A-C plate 2",
-            "source": r'''
+            "source": r"""
 async def _dilutions():
     # Same reason as 02.1b: build the deck and run the protocol here rather than
     # reading whatever globals the notebook finished with.
     global deck, lh
     deck = await deck_exercise_3()
     lh = await visualize_deck(deck, LiquidHandlerChatterboxBackend())
-    await run_protocol_exercise_3(deck, lh)
+
+    # `run_protocol_exercise_4` calls exercise 3 itself to build the stock
+    # columns -- running it here as well would send the corner-tip pick-up
+    # through the same three spots twice and raise NoTipError.
+    try:
+        await run_protocol_exercise_4(deck, lh)
+    except Exception as exc:
+        # Exercise 4 runs on exercise 3's deck and stocks, so a broken exercise 3
+        # fails here too. Say which one broke: "no liquid in row A" would send the
+        # student looking in the wrong exercise. Only paid on failure.
+        try:
+            deck = await deck_exercise_3()
+            lh = await visualize_deck(deck, LiquidHandlerChatterboxBackend())
+            await run_protocol_exercise_3(deck, lh)
+        except Exception as exc3:
+            return False, f"blocked by exercise 3: {type(exc3).__name__}: {exc3}"
+        return False, f"{type(exc).__name__}: {exc}"
 
     # The dilution plates, in deck order. Filtering to 96 wells drops the
     # single-well stock troughs, which are Plates too.
@@ -278,9 +363,7 @@ async def _dilutions():
                 return
             # A finished row does not read 480 uL across. Every well but the
             # last has passed 60 uL on to its neighbour, so the row is
-            # 420 ... 420, 480 -- and the first well is 60 uL lower again if the
-            # student followed the recipe's 420 uL start rather than the
-            # protocol section's 480 uL (the prompt states both).
+            # 420 ... 420, 480.
             final = series[-1]
             if not D.close(final, 480.0, 30.0):
                 problems.append(f"{label} row {row}: last well holds {final:.0f} uL, expected ~480")
@@ -290,15 +373,15 @@ async def _dilutions():
             if off:
                 problems.append(f"{label} row {row}: {len(off)} well(s) not ~{carried:.0f} uL "
                                 "after passing 60 uL on")
-            if not (D.close(series[0], carried, 30.0) or D.close(series[0], carried - 60.0, 30.0)):
+            if not D.close(series[0], carried, 30.0):
                 problems.append(f"{label} row {row}: stock well holds {series[0]:.0f} uL, "
                                 f"expected ~{carried:.0f}")
     band(first, "ABC", "red")
     band(first, "EFG", "blue")
     band(second, "ABC", "yellow")
     return (not problems), "; ".join(problems[:4])
-await check("02.3 serial dilutions", _dilutions)
-''',
+await check("02.4 serial dilutions", _dilutions)
+""",
         },
     ],
 
