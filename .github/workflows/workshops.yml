@@ -11,7 +11,10 @@ name: Workshops
 #                     one module check_workshops.py cannot cover: it stubs the
 #                     visualizer imports out, so the notebooks exercise fakes.
 #                     Includes a Playwright layer for the browser code the
-#                     module injects into the visualizer page.
+#                     module injects into the visualizer page, and a cell-by-cell
+#                     walk of every workshop against the *real* module, which
+#                     asserts one live session at a time and no port left bound
+#                     (tests/test_notebook_session_walk.py).
 #   grade           — runs the autograder against the reference solutions (a
 #                     separate private repo) and asserts the untouched stubs
 #                     still score zero. Skipped where SOLUTIONS_TOKEN is absent.
