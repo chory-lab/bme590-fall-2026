@@ -619,17 +619,22 @@ def write_workspace(root: Path) -> None:
     ok(f"{WORKSPACE_FILE} written - PyLabRobot's source is in Ctrl+Shift+F")
 
 
-def configure_vscode(root: Path) -> None:
-    # The step students most often got wrong by hand: the old README walked them
-    # through Python: Select Interpreter. Writing it removes the choice.
+def write_settings(root: Path) -> None:
+    """Write .vscode/settings.json, keeping whatever else is already in it.
+
+    Separate from `configure_vscode` because the installer is not the only
+    caller any more: `bme590 start` repairs this file on every workshop open, so
+    a setting added mid-semester reaches students who installed before it
+    existed and will never run the installer again. Nothing here touches the
+    network or VS Code itself, which is what makes it safe to call that often.
+    """
     settings_dir = root / ".vscode"
     settings_dir.mkdir(exist_ok=True)
-    interpreter = interpreter_path()
 
     # Merge, do not replace. Re-running the installer is the advertised fix for
     # everything, and it should not be the thing that silently deletes a font
-    # size or a formatter someone set for this folder. Our three keys win;
-    # anything else is left alone.
+    # size or a formatter someone set for this folder. Our keys win; anything
+    # else is left alone.
     settings_file = settings_dir / "settings.json"
     settings: dict = {}
     if settings_file.exists():
@@ -639,11 +644,21 @@ def configure_vscode(root: Path) -> None:
                 settings = existing
         except (OSError, ValueError):
             say("the existing .vscode/settings.json is not readable JSON - replacing it")
-    settings.update(class_settings(root, interpreter))
+    settings.update(class_settings(root, interpreter_path()))
     settings_file.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
     ok(".vscode/settings.json written")
 
+
+def configure_editor(root: Path) -> None:
+    """Both editor config files. The whole of what `bme590 start` repairs."""
+    write_settings(root)
     write_workspace(root)
+
+
+def configure_vscode(root: Path) -> None:
+    # The step students most often got wrong by hand: the old README walked them
+    # through Python: Select Interpreter. Writing it removes the choice.
+    configure_editor(root)
 
     # Skipped, not failed, when the `code` CLI is absent: VS Code offers these
     # itself on first opening a notebook, and a missing editor must not fail an

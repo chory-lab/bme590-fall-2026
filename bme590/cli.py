@@ -264,6 +264,126 @@ def repair_kernel() -> None:
     run([python(), "scripts/register_kernel.py"], stdout=subprocess.DEVNULL)
 
 
+def _installer():
+    """scripts/install.py, imported for the config it would write.
+
+    Imported rather than duplicated: a second copy of the settings would drift
+    from the installer's, and the drift reaches students as "labware
+    autocomplete works on my machine". Stdlib-only and guarded by a
+    `__main__` check, so importing it runs nothing -- it does line-buffer and
+    re-encode stdout/stderr on import, which is what doctor.py does too and is
+    harmless here.
+
+    Imported inside the function, not at module scope: `bme590 --help` should
+    not pay for it, and a checkout missing scripts/ should fail at the one
+    command that needs it rather than at startup.
+    """
+    import sys
+
+    scripts = str(ROOT / "scripts")
+    if scripts not in sys.path:  # called on every `start`; do not grow sys.path
+        sys.path.insert(0, scripts)
+    import install
+
+    return install
+
+
+def _stale_settings(got: dict, want: dict) -> list[str]:
+    """The keys where what is on disk is not what the installer would write.
+
+    Compared by value, not by presence. The first version of this check asked
+    only whether pylabrobot appeared in `packageIndexDepths` at all, which read
+    as current after the depth had been downgraded 4 -> 1 and
+    `autoImportCompletions` removed -- the exact state in which labware
+    autocomplete is blind. Comparing against the writer means a setting added
+    to `class_settings` later propagates the day it lands, with no second list
+    here to keep in step.
+    """
+    return sorted(key for key, value in want.items() if got.get(key) != value)
+
+
+def editor_config_problems() -> list[str]:
+    """What is out of date in this checkout's editor config, if anything.
+
+    Checked rather than rewritten every time for the same reason `repair_kernel`
+    checks first: the happy path is every `bme590 start`. Everything here is a
+    file read and a dict compare -- no subprocess, nothing over the network.
+
+    The two files go stale for different reasons. `bme590.code-workspace` is
+    gitignored and generated per machine, so a `git pull` can never deliver it:
+    a student who installed before it existed simply has no workspace, and
+    PyLabRobot is absent from Ctrl+Shift+F because .venv is gitignored and VS
+    Code search honours ignore files. `.vscode/settings.json` is merged into by
+    the installer, so an older install keeps the file and misses whatever was
+    added since.
+
+    Both carry the class settings, and the workspace copy is the one that
+    matters most -- it is what `bme590 start` actually opens -- so both are
+    compared.
+    """
+    import json
+
+    problems = []
+    install = _installer()
+
+    workspace = ROOT / "bme590.code-workspace"
+    if not workspace.exists():
+        problems.append("no bme590.code-workspace (PyLabRobot is not in Ctrl+Shift+F)")
+    else:
+        try:
+            document = json.loads(workspace.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            problems.append("bme590.code-workspace is not readable JSON")
+            document = {}
+        # A workspace whose second root no longer exists is worse than none: VS
+        # Code shows the folder greyed out and searches nothing. Reinstalling
+        # pylabrobot at a new version moves that path.
+        for folder in document.get("folders", [])[1:]:
+            path = folder.get("path", "")
+            if path and not (ROOT / path).exists() and not Path(path).exists():
+                problems.append(f"bme590.code-workspace points at a missing {path}")
+        # The workspace spells the interpreter out absolutely; ${workspaceFolder}
+        # is ambiguous once there is more than one folder root.
+        stale = _stale_settings(
+            document.get("settings", {}),
+            install.class_settings(ROOT, str(install.venv_python(ROOT))),
+        )
+        if stale:
+            problems.append(
+                "bme590.code-workspace is older than this checkout: " + ", ".join(stale)
+            )
+
+    settings_file = ROOT / ".vscode/settings.json"
+    if not settings_file.exists():
+        problems.append("no .vscode/settings.json")
+    else:
+        try:
+            settings = json.loads(settings_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            problems.append(".vscode/settings.json is not readable JSON")
+            settings = {}
+        stale = _stale_settings(
+            settings, install.class_settings(ROOT, install.interpreter_path())
+        )
+        if stale:
+            problems.append(
+                ".vscode/settings.json is older than this checkout: " + ", ".join(stale)
+            )
+
+    return problems
+
+
+def repair_editor_config() -> None:
+    """Bring the editor config up to date. Idempotent, and quiet when it is."""
+    problems = editor_config_problems()
+    if not problems:
+        return
+    print("updating the VS Code configuration for this folder:")
+    for problem in problems:
+        print(f"  - {problem}")
+    run([python(), "scripts/configure_editor.py"], stdout=subprocess.DEVNULL)
+
+
 def busy_ports() -> list[int]:
     """The visualizer ports something is already listening on.
 
@@ -304,6 +424,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     if changed:
         sync_if_needed()
     repair_kernel()
+    # After the pull, before the window opens: a pull is what delivers a new
+    # editor setting, and the window about to be opened is the one that has to
+    # pick it up.
+    repair_editor_config()
     if run([python(), "scripts/start_workshop.py", args.workshop]) not in (0, 1):
         return 1
 
@@ -432,6 +556,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     # second -- so a student who runs the command the error message told them to
     # run gets it fixed rather than told about it twice.
     repair_kernel()
+    repair_editor_config()
     return run([python(), "scripts/doctor.py"])
 
 
