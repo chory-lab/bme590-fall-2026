@@ -77,7 +77,7 @@ The solution notebooks are an answer key and never live in this (public) repo. T
 
   ```bash
   git clone https://github.com/chory-lab/bme590-fall-2026-solutions solutions
-  uv run --group notebook python scripts/grade.py solutions/    # must be 24/24 checks, 350/350 points
+  uv run --group notebook python scripts/grade.py solutions/    # must be 24/24 checks, 355/355 points
   ```
 
 - In CI, the `grade` job in `.github/workflows/workshops.yml` checks out the private repo into `solutions/` using the `SOLUTIONS_TOKEN` repo secret, rebuilds the solution notebooks from `sources/` and asserts they are unchanged (`git diff --exit-code`), grades them (positive control), then grades the untouched workshop stubs (negative control, must score 0). If the secret is absent the job self-skips with a warning rather than failing.

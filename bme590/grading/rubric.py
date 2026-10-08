@@ -540,7 +540,7 @@ await check("04.1 add_fragments", _add_fragments)
         },
         {
             "id": "04.2",
-            "points": 20,
+            "points": 25,
             "ask": "convert_well_id, get_well and extract_fragment_combinations",
             "source": r'''
 # The ask is a *string* in the plate's own format -- "A01" -> "A1" -- not an
