@@ -34,12 +34,11 @@ from bme590.grading.rubric import RUBRIC, points_for, probe_for, score_for  # no
 
 MARKER = "###GRADE###"
 
-# Cells that exist only to be copied into a `.txt` submission. Workshop 03 ends
-# each exercise with one, and it re-declares every graded class -- with `...`
-# bodies in an untouched copy -- and re-runs the exercise 2E protocol against a
-# deck that protocol has already finished with. Executing them therefore either
-# replaces the student's working classes with stubs or raises, in both cases
-# grading something the student never meant to run.
+# Cells that exist only to record a submission GIF. Workshop 03 ends each
+# exercise with one, and it rebuilds that exercise's starting deck and rebinds
+# `deck`/`lh`. Executing the exercise 2 one would replace the finished 2E
+# staircase the probe inspects, so the probe would grade a deck the student's
+# protocol never touched.
 TEMPLATE_MARKERS = ("Save as exercise_",)
 
 
