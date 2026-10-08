@@ -96,7 +96,14 @@ _PYODIDE_URL = (
 # ipython and jedi are not workshop imports: the Pyodide kernel loads them from
 # the lock as it boots. Without them every one of their 13 wheels 404s, the
 # kernel never finishes starting, and no cell on the site can run.
-_PYODIDE_PACKAGES = ("pandas", "numpy", "pillow", "micropip", "ipython", "jedi")
+#
+# typing-extensions is in the lock *and* in our own pypi/ index (anywidget needs
+# it). Unvendored, the install could resolve it to the lock's 404ing wheel: the
+# live site failed with "No module named 'typing_extensions'" while a local
+# server and CI's browser test both passed. Vendoring it makes either
+# resolution work.
+_PYODIDE_PACKAGES = ("pandas", "numpy", "pillow", "micropip", "ipython", "jedi",
+                     "typing-extensions")
 _PYODIDE_CDN = f"https://cdn.jsdelivr.net/pyodide/v{_PYODIDE_VERSION}/full"
 
 # The Pyodide kernel, as JupyterLite registers it. The repo notebooks carry the
