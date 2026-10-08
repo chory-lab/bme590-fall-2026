@@ -92,7 +92,11 @@ _PYODIDE_URL = (
 # wheel is a 404 rather than a fall back to the CDN -- so anything reachable
 # from here must be fetched beside the lock. Transitive dependencies are
 # resolved from the lock itself, not listed by hand.
-_PYODIDE_PACKAGES = ("pandas", "numpy", "pillow", "micropip")
+#
+# ipython and jedi are not workshop imports: the Pyodide kernel loads them from
+# the lock as it boots. Without them every one of their 13 wheels 404s, the
+# kernel never finishes starting, and no cell on the site can run.
+_PYODIDE_PACKAGES = ("pandas", "numpy", "pillow", "micropip", "ipython", "jedi")
 _PYODIDE_CDN = f"https://cdn.jsdelivr.net/pyodide/v{_PYODIDE_VERSION}/full"
 
 # The Pyodide kernel, as JupyterLite registers it. The repo notebooks carry the
@@ -369,9 +373,18 @@ def _seed_pyodide_packages(out_dir: Path) -> None:
 
     packages = _json.loads(lock.read_text(encoding="utf-8"))["packages"]
 
-    wanted, queue = set(), list(_PYODIDE_PACKAGES)
+    # The lock's keys are normalized names ("prompt-toolkit") but its `depends`
+    # lists are not ("prompt_toolkit"), so normalize before every lookup.
+    import re as _re
+
+    def normalize(name: str) -> str:
+        return _re.sub(r"[-_.]+", "-", name).lower()
+
+    packages = {normalize(name): entry for name, entry in packages.items()}
+
+    wanted, queue = set(), [normalize(name) for name in _PYODIDE_PACKAGES]
     while queue:
-        name = queue.pop()
+        name = normalize(queue.pop())
         if name in wanted:
             continue
         entry = packages.get(name)
@@ -423,20 +436,28 @@ def _opentrons_defs(dest: Path) -> None:
 
 # Sections that only make sense on a desktop install, stripped from the browser
 # build. The site *is* the environment here: telling a student to run the
-# notebook locally in VS Code, or to paste an extraPaths hack into settings.json
-# for an interpreter they do not have, is at best noise and at worst sends them
+# notebook locally in VS Code, to pick the class kernel in VS Code's kernel
+# picker, or to `uv run bme590 update` is at best noise and at worst sends them
 # off to fix a machine that is working.
 #
-# Matched on marker text and fail-loud: if a heading is reworded, the build stops
-# rather than quietly shipping installation instructions to the browser.
+# Every workshop carries exactly these two: the kernel check, and the usage note
+# in its title cell. Matched on marker text and fail-loud: if a heading is
+# reworded or removed, the build stops rather than quietly shipping desktop
+# instructions to the browser -- or, the other way round, a stale marker that
+# now matches real content stripping it.
 _DESKTOP_CELLS = (
-    "### Getting Started",                              # PLR installation prose
-    "#### Auto-complete / Pylance Missing Imports Issue",
+    "Check your kernel first",                          # VS Code kernel picker
 )
 
-# (cell marker, cut everything before this) -- for cells that mix desktop-only
-# advice with content worth keeping.
+# (cell marker, cut everything before this) -- workshop 00's usage note shares a
+# cell with the introduction, which is worth keeping.
 _DESKTOP_TRIMS = (("### Usage Note", "### Welcome to PyLabRobot!"),)
+
+# Cell marker: cut from it to the end of the cell -- the usage note at the foot
+# of every other workshop's title cell.
+_DESKTOP_TAILS = ("### Usage Note",)
+
+_DESKTOP_SECTIONS_PER_WORKSHOP = 2
 
 
 def _strip_desktop_sections(nb, name: str) -> None:
@@ -449,20 +470,24 @@ def _strip_desktop_sections(nb, name: str) -> None:
             continue
         for marker, keep_from in _DESKTOP_TRIMS:
             if marker in source and keep_from in source:
-                cell["source"] = source[source.index(keep_from):]
+                source = source[source.index(keep_from):]
                 dropped += 1
+        for marker in _DESKTOP_TAILS:
+            if marker in source:
+                source = source[:source.index(marker)].rstrip() + "\n"
+                dropped += 1
+        cell["source"] = source
         kept.append(cell)
     nb.cells = kept
 
-    if name.startswith("00_") and dropped < len(_DESKTOP_CELLS) + len(_DESKTOP_TRIMS):
+    if dropped != _DESKTOP_SECTIONS_PER_WORKSHOP:
         raise SystemExit(
-            f"{name}: expected to strip "
-            f"{len(_DESKTOP_CELLS) + len(_DESKTOP_TRIMS)} desktop sections, stripped "
-            f"{dropped}. The headings in _DESKTOP_CELLS/_DESKTOP_TRIMS have moved; "
-            "update them rather than shipping install instructions to the browser."
+            f"{name}: expected to strip {_DESKTOP_SECTIONS_PER_WORKSHOP} desktop "
+            f"sections (the kernel check and the usage note), stripped {dropped}. "
+            "The headings in _DESKTOP_CELLS/_DESKTOP_TRIMS/_DESKTOP_TAILS have moved; "
+            "update them rather than shipping desktop instructions to the browser."
         )
-    if dropped:
-        print(f"    stripped {dropped} desktop-only section(s)")
+    print(f"    stripped {dropped} desktop-only section(s)")
 
 
 def _strip_outputs(nb) -> None:

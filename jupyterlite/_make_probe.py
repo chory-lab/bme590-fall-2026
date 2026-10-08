@@ -85,7 +85,7 @@ def main() -> None:
     # go ahead of the first code cell instead, which is also a better test: if
     # SYNC_EXEC_OK prints, the extension had the kernel ready before the
     # notebook's own code ran.
-    deck_built = index_of("deck = await make_deck_with_carriers_and_contents()")
+    deck_built = index_of("await build_deck(deck)")
     first_code = next(i for i, c in enumerate(cells) if c["cell_type"] == "code")
 
     # Insert from the bottom up so the earlier index stays valid.
