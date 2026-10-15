@@ -143,6 +143,49 @@ _RECORDER_JS = """
 </script>
 """
 
+# Repaints a plate (or tip rack) when something is assigned onto or taken off it.
+# The stock page caches each plate's Konva group as a bitmap once it goes idle,
+# and its resource_assigned handler only caches a group that is not cached yet.
+# A lid assigned to a plate already on the deck is drawn into that group, but
+# the old bitmap -- without the lid -- keeps being painted until the plate itself
+# is redrawn, i.e. moved (workshop 03, exercise 2.D: lids "appear" only on the
+# move). Removing a lid has the mirror-image problem. Uncaching the owner after
+# the stock handler runs lets the page draw it live and re-cache it once idle,
+# the same path set_state already takes for volume and tip changes.
+_CACHE_REFRESH_JS = """
+<script>
+(function () {
+  function install() {
+    if (typeof window.processCentralEvent !== "function" ||
+        typeof window.getCacheOwner !== "function" ||
+        typeof window.markCacheOwnerActive !== "function") {
+      return setTimeout(install, 200);
+    }
+    var origProcessCentralEvent = window.processCentralEvent;
+    window.processCentralEvent = async function (event, data) {
+      // Resolve the owner before the stock handler runs: on unassign the
+      // resource (and its parent link) is gone afterwards.
+      var owner = null;
+      if (event === "resource_assigned" && data && data.resource) {
+        owner = window.getCacheOwner(window.resources[data.resource.parent_name]);
+      } else if (event === "resource_unassigned" && data) {
+        var removed = window.resources[data.resource_name];
+        owner = removed ? window.getCacheOwner(removed.parent) : null;
+      }
+      var result = await origProcessCentralEvent.call(this, event, data);
+      if (owner && window.resources[owner.name] === owner) {
+        window.markCacheOwnerActive(owner);
+        window.resourceLayer.batchDraw();
+      }
+      return result;
+    };
+  }
+
+  install();
+})();
+</script>
+"""
+
 # Hides everything that is not the deck: the left toolbar (aside), the right
 # side panel and its resize handle, and the reset-view button. Applied when
 # RecordingVisualizer is built with declutter=True, or per-page-load with
@@ -232,8 +275,8 @@ class RecordingVisualizer(Visualizer):
                         content = content.replace("{{ source_filename }}", source_filename)
                         content = content.replace("{{ liquid_color }}", liquid_color)
 
-                        # Inject the code-driven recorder (the one change vs stock).
-                        extras = [_RECORDER_JS]
+                        # Inject the code-driven recorder and the lid repaint fix.
+                        extras = [_RECORDER_JS, _CACHE_REFRESH_JS]
                         # Declutter: kwarg applies always; ?minimal=1 (or
                         # ?clean=1, ?deck-only=1) toggles it per page load.
                         minimal_kwarg = getattr(server, "_declutter", False)
