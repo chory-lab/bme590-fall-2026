@@ -1,0 +1,123 @@
+name: viz3d demo
+
+# The community demo of PyLabRobot PRs 1468 (motion playback) and 1470 (collision detection),
+# in demos/viz3d. It is its own uv project, pinned to the PRs' branch, so it is tested on its own:
+# a change here never touches the course environment's checks, and theirs never touch this.
+#
+# The nightly run is the one that matters while the PRs are open: it moves the pin to the PR
+# branch's newest commit and runs everything again, so a push to the PR that breaks the demo shows
+# up here the next morning rather than live in front of an audience.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "demos/viz3d/**"
+      - ".github/workflows/viz3d-demo.yml"
+  pull_request:
+    paths:
+      - "demos/viz3d/**"
+      - ".github/workflows/viz3d-demo.yml"
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: viz3d-demo-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: demos/viz3d
+
+jobs:
+  lint:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: demos/viz3d/uv.lock
+      - name: uv.lock matches pyproject.toml
+        run: uv lock --check
+      - run: uv run --locked --group dev ruff check .
+      - run: uv run --locked --group dev ruff format --check .
+      - name: Notebook committed without outputs
+        run: uv run --locked --group dev pytest -q tests/test_notebook.py -k without_outputs
+
+  notebook:
+    # Every refusal the demo shows is the resource model's, so this is the whole collision story;
+    # three platforms because a live demo is given from whatever laptop is at hand.
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.12"]
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+          cache-dependency-glob: demos/viz3d/uv.lock
+      - name: viz3d setup (what the installers run)
+        run: uv run --locked viz3d setup --dev
+      - run: uv run --locked viz3d doctor
+      - run: uv run --locked viz3d check -- -v
+
+  browser:
+    # The notebook again, with a real page watching: every motion played, every refusal drawn.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: demos/viz3d/uv.lock
+      - run: uv run --locked viz3d setup --dev
+      - run: uv run --locked playwright install --with-deps chromium
+      - run: uv run --locked viz3d check --browser -- -v -m browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viz3d-browser-run
+          path: demos/viz3d/tests/artifacts/
+          if-no-files-found: ignore
+
+  upstream:
+    # Nightly, and on demand: the demo against the PR branch's newest commit.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --locked viz3d setup --dev
+      - run: uv run viz3d status
+      - name: Bump to the PR's newest commit
+        run: uv run viz3d bump --no-check
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run viz3d check --browser -- -v
+      - name: The lock the nightly ran with
+        if: always()
+        run: git diff --stat -- . && git diff -- uv.lock | head -40
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viz3d-upstream-run
+          path: |
+            demos/viz3d/tests/artifacts/
+            demos/viz3d/uv.lock
+          if-no-files-found: ignore

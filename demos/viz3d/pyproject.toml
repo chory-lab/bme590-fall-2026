@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "viz3d-demo"
+version = "0.1.0"
+description = "A short demo of PyLabRobot's 3D viewer: motion playback (PR 1468) and collision detection (PR 1470)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  # Not on PyPI yet: the PRs' branch, resolved through [tool.uv.sources] below
+  # and pinned to an exact commit in uv.lock. `uv run viz3d bump` moves the pin.
+  "pylabrobot",
+]
+
+[project.scripts]
+viz3d = "viz3d_demo.cli:main"
+
+# `uv sync` (no flags) installs what running the notebook needs. The demo is
+# deliberately its own project, not part of the course environment one level
+# up: that one pins pylabrobot==0.2.2, and this one needs the PR branch.
+[dependency-groups]
+notebook = [
+  "ipykernel>=6.29",
+  "nbclient>=0.10",
+  "nbformat>=5.10",
+]
+lab = [
+  "jupyterlab>=4.2",
+]
+dev = [
+  "pytest>=8.2",
+  "pytest-asyncio>=0.23",
+  "pytest-timeout>=2.3",
+  "playwright>=1.44",
+  "pillow>=10.3",
+  "ruff>=0.6",
+]
+
+[tool.uv]
+default-groups = ["notebook"]
+
+# PR 1470 is stacked on PR 1468, so its head branch carries both.
+[tool.uv.sources]
+pylabrobot = { git = "https://github.com/stefangolas/pylabrobot", branch = "star-collision" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+timeout = 600
+markers = [
+  "browser: drives the viewer page in a headless Chromium (deselect with -m 'not browser')",
+]
+
+[tool.ruff]
+line-length = 100
+indent-width = 2
+target-version = "py311"
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# A notebook imports in the cell where the reader first needs the name.
+"*.ipynb" = ["E402"]

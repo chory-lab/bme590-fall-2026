@@ -60,3 +60,7 @@ node_modules/
 
 # Static Pyodide demo (build artifact of plr_workshops/build_demo.py).
 demo/
+
+# The viz3d demo's generated wheels (jupyterlite/build.py builds them from demos/viz3d/uv.lock).
+jupyterlite/pypi/pylabrobot-1*.whl
+jupyterlite/pypi/viz3d_demo-*.whl
