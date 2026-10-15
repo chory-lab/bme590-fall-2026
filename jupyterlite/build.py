@@ -22,6 +22,13 @@ import nbformat
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent
 
+# The viz3d community demo (demos/viz3d): PyLabRobot PRs 1468/1470 in the 3D viewer. It ships as
+# its own page, viz3d.html, with its own notebook, its own PyLabRobot (the PRs' branch, pinned in
+# the demo's uv.lock) and a static copy of the viewer that talks to the kernel over the bridge in
+# viz3d/viz3d_shim.js. See viz3d/README.md.
+VIZ3D = REPO / "demos" / "viz3d"
+VIZ3D_SITE = HERE / "viz3d"
+
 # The real workshops, browser-ready. Each is copied into content/workshops/
 # with a bootstrap cell prepended.
 WORKSHOPS = [REPO / "workshops" / p for p in
@@ -176,6 +183,15 @@ def _workshops() -> None:
             print(f"  {name} -> content/{name}")
 
     _opentrons_defs(content / "otdefs")
+
+    # Under viz3d/: the bootstrap extension installs the demo's own packages for notebooks there.
+    viz3d = content / "viz3d"
+    viz3d.mkdir(parents=True, exist_ok=True)
+    nb = nbformat.read(VIZ3D / "demo.ipynb", as_version=4)
+    _strip_outputs(nb)
+    nb.metadata["kernelspec"] = dict(_BROWSER_KERNELSPEC)
+    nbformat.write(nb, viz3d / "demo.ipynb")
+    print(f"  viz3d demo -> content/viz3d/demo.ipynb ({len(nb.cells)} cells)")
 
     # The synthetic bridge fixture. Small, known-good, and independent of the
     # workshops: when the real notebooks stop painting the deck, running this
@@ -533,6 +549,7 @@ def main():
     # The browser wheel: build from the explicit KERNEL_MODULES list, never the
     # whole repo (stale pip caches keep resurrecting deleted files).
     _build_kernel_wheel()
+    _build_viz3d_wheels()
     contents = _wheel_contents()
     # Modules plus the Opentrons definitions the bootstrap seeds. Both halves are
     # asserted: a wheel missing otdefs/ builds and installs perfectly well, then
@@ -608,6 +625,7 @@ def _assemble_deploy(deploy: Path, out_dir: Path) -> None:
     shutil.copy2(HERE / "bridge.js", deploy / "bridge.js")
     shutil.copy2(HERE / "deck.html", deploy / "deck.html")
     shutil.copytree(out_dir, deploy / "output")
+    _assemble_viz3d(deploy)
     print(f"deploy root -> {deploy} (index.html + output/ + deck.html + bridge.js)")
 
 
@@ -760,6 +778,136 @@ def _wheel_contents() -> list:
     with zipfile.ZipFile(wheel) as z:
         return [n for n in z.namelist()
                 if n.startswith("plr_workshops/") or n.startswith("bme590/")]
+
+
+# -- viz3d -----------------------------------------------------------------------------------
+
+def _viz3d_pin() -> tuple:
+    """The demo's PyLabRobot as (git url, commit), from demos/viz3d/uv.lock.
+
+    The lock is the one source of truth: the desktop demo, its CI and this site all run the same
+    commit, and `uv run viz3d bump` moves all three at once.
+    """
+    import tomllib
+
+    lock = tomllib.loads((VIZ3D / "uv.lock").read_text(encoding="utf-8"))
+    for package in lock["package"]:
+        if package["name"] == "pylabrobot":
+            git = package["source"]["git"]
+            url, _, commit = git.partition("#")
+            return url.split("?")[0], commit
+    raise SystemExit("demos/viz3d/uv.lock pins no pylabrobot")
+
+
+def _viz3d_plr_wheel() -> Path:
+    """The PRs' PyLabRobot as a wheel, built once per pinned commit and kept in .cache/."""
+    url, commit = _viz3d_pin()
+    cache = HERE / ".cache" / "viz3d" / commit
+    found = sorted(cache.glob("pylabrobot-*.whl"))
+    if not found:
+        cache.mkdir(parents=True, exist_ok=True)
+        print(f"  building pylabrobot @ {commit[:10]} for the viz3d demo...")
+        subprocess.run(
+            [str(python()), "-m", "pip", "wheel", "--no-deps", "-q", "--wheel-dir", str(cache),
+             f"git+{url}@{commit}"],
+            check=True,
+        )
+        found = sorted(cache.glob("pylabrobot-*.whl"))
+    if len(found) != 1:
+        raise SystemExit(f"expected one pylabrobot wheel in {cache}, found {found}")
+    return found[0]
+
+
+def _build_viz3d_wheels() -> None:
+    """Put the demo's two wheels in pypi/: the PRs' pylabrobot, and the demo's browser package.
+
+    Both are generated (and gitignored). piplite then holds two pylabrobots side by side; the demo
+    package pins its own exactly, so a notebook under viz3d/ never resolves the workshops' 0.2.2.
+    """
+    import tempfile
+    import zipfile
+
+    pypi = HERE / "pypi"
+    for stale in [*pypi.glob("pylabrobot-1*.whl"), *pypi.glob("viz3d_demo-*.whl")]:
+        stale.unlink()
+    plr = _viz3d_plr_wheel()
+    shutil.copy2(plr, pypi / plr.name)
+    with zipfile.ZipFile(plr) as z:
+        meta = next(n for n in z.namelist() if n.endswith(".dist-info/METADATA"))
+        version = next(
+            line.split(":", 1)[1].strip()
+            for line in z.read(meta).decode().splitlines()
+            if line.startswith("Version:")
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        pkg = tmp / "viz3d_demo"
+        pkg.mkdir()
+        # What the notebook imports, and the bridge; not the desktop CLI.
+        for name in ("__init__.py", "session.py", "bridge.py"):
+            shutil.copy2(VIZ3D / "src" / "viz3d_demo" / name, pkg / name)
+        (tmp / "pyproject.toml").write_text(
+            "[build-system]\n"
+            'requires = ["setuptools>=68", "wheel"]\n'
+            'build-backend = "setuptools.build_meta"\n'
+            "\n"
+            "[project]\n"
+            'name = "viz3d-demo"\n'
+            'version = "0.1.0"\n'
+            'requires-python = ">=3.11"\n'
+            f'dependencies = ["pylabrobot=={version}"]\n'
+            "\n"
+            "[tool.setuptools]\n"
+            'packages = ["viz3d_demo"]\n',
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [str(python()), "-m", "pip", "wheel", "--no-deps", "-q", "--wheel-dir", str(pypi),
+             str(tmp)],
+            check=True,
+        )
+    print(f"  viz3d wheels -> pypi/ ({plr.name}, viz3d_demo-0.1.0)")
+
+
+def _assemble_viz3d(deploy: Path) -> None:
+    """viz3d.html, and under viz3d/viewer/ the viewer page and its model files.
+
+    Taken from the very wheel the kernel installs, so the page and the kernel are one version: the
+    PR's static/ unchanged except for the WebSocket shim loaded ahead of it, and every .glb at its
+    path under the package, which is where `BridgeViewer` points a mesh.
+    """
+    import zipfile
+
+    shutil.copy2(VIZ3D_SITE / "viz3d.html", deploy / "viz3d.html")
+    viewer = deploy / "viz3d" / "viewer"
+    static = "pylabrobot/visualizer3D/static/"
+    models = 0
+    with zipfile.ZipFile(_viz3d_plr_wheel()) as z:
+        for name in z.namelist():
+            if name.endswith("/"):
+                continue
+            if name.startswith(static):
+                target = viewer / name[len(static):]
+            elif name.startswith("pylabrobot/") and name.endswith(".glb"):
+                target = viewer / "models" / name[len("pylabrobot/"):]
+                models += 1
+            else:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(z.read(name))
+
+    index = viewer / "index.html"
+    html = index.read_text(encoding="utf-8")
+    for placeholder, value in (("{{ ws_port }}", "0"), ("{{ source_filename }}", "demo.ipynb")):
+        if placeholder not in html:
+            raise SystemExit(f"the viewer's index.html no longer has {placeholder}: update build.py")
+        html = html.replace(placeholder, value)
+    # Ahead of every script of the page's own: it must be the WebSocket they construct.
+    html = html.replace("</head>", '<script src="./viz3d_shim.js"></script>\n</head>', 1)
+    index.write_text(html, encoding="utf-8")
+    shutil.copy2(VIZ3D_SITE / "viz3d_shim.js", viewer / "viz3d_shim.js")
+    print(f"  viz3d page -> viz3d.html + viz3d/viewer/ ({models} model files)")
 
 
 if __name__ == "__main__":

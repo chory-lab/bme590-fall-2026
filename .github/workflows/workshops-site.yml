@@ -13,12 +13,19 @@ on:
       - "plr_workshops/**"
       - "jupyterlite/**"
       - "pyproject.toml"
+      # The viz3d demo's page (viz3d.html) ships its notebook, bridge and pinned PyLabRobot.
+      - "demos/viz3d/demo.ipynb"
+      - "demos/viz3d/uv.lock"
+      - "demos/viz3d/src/**"
       - ".github/workflows/workshops-site.yml"
   pull_request:
     paths:
       - "workshops/**"
       - "plr_workshops/**"
       - "jupyterlite/**"
+      - "demos/viz3d/demo.ipynb"
+      - "demos/viz3d/uv.lock"
+      - "demos/viz3d/src/**"
       - ".github/workflows/workshops-site.yml"
   workflow_dispatch:
 
@@ -81,6 +88,12 @@ jobs:
           test -s deploy/output/files/workshops/00_plr_introduction.ipynb
           test -s deploy/output/files/data/fragments.csv
           test -s deploy/output/files/figs/fig_1_plr.jpg
+          test -s deploy/viz3d.html
+          test -s deploy/viz3d/viewer/index.html
+          test -s deploy/viz3d/viewer/viz3d_shim.js
+          test -s deploy/output/files/viz3d/demo.ipynb
+          grep -q viz3d_shim.js deploy/viz3d/viewer/index.html
+          test "$(find deploy/viz3d/viewer/models -name '*.glb' | wc -l)" -gt 0
 
       - name: Browser integration test
         # The check that would have caught the missing anywidget labextension,
@@ -103,6 +116,25 @@ jobs:
             node jupyterlite/drive.cjs
         env:
           PYTHONPATH: ${{ github.workspace }}
+
+      - name: viz3d page integration test
+        # The viz3d demo on its own page (viz3d.html), in headless Chromium: the bootstrap installs
+        # the PRs' PyLabRobot rather than the workshops' 0.2.2, every cell runs in the browser
+        # kernel, every motion is played and answered over the BroadcastChannel bridge mid-cell,
+        # and the refusals are drawn. Its own server, so it does not lean on the step above's.
+        run: |
+          pip install "playwright>=1.44" pillow
+          python -m playwright install --with-deps chromium
+          python -m http.server 8813 --directory deploy-test &
+          sleep 3
+          python jupyterlite/viz3d/drive_viz3d.py --url http://127.0.0.1:8813/ --out viz3d-run
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: viz3d-site-run
+          path: viz3d-run/
+          if-no-files-found: ignore
 
       - uses: actions/upload-pages-artifact@v3
         with:

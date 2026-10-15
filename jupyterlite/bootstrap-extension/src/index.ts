@@ -42,6 +42,27 @@ from plr_workshops.jupyterlite_bootstrap import initialize
 await initialize()
 `;
 
+/** The viz3d demo (demos/viz3d in the repo) runs against an unreleased PyLabRobot - the branch of
+ *  PRs 1468/1470 - while the workshops pin 0.2.2. Each notebook has a kernel of its own, so the two
+ *  never meet; what must not happen is the workshops' install landing in the demo's kernel, which
+ *  would leave it with 0.2.2 and no 3D viewer at all. */
+const VIZ3D_DIR = 'viz3d/';
+
+const VIZ3D_INSTALL = `
+import piplite
+await piplite.install("viz3d-demo")
+`;
+
+const VIZ3D_INITIALIZE = `
+import viz3d_demo.session
+`;
+
+function stepsFor(panel: NotebookPanel): { install: string; initialize: string } {
+  return panel.context.path.startsWith(VIZ3D_DIR)
+    ? { install: VIZ3D_INSTALL, initialize: VIZ3D_INITIALIZE }
+    : { install: INSTALL, initialize: INITIALIZE };
+}
+
 /** Kernel ids already prepared. A kernel restart issues a new id, so this both
  *  prevents duplicate work and re-bootstraps automatically after a restart. */
 const prepared = new Set<string>();
@@ -99,9 +120,10 @@ async function bootstrap(panel: NotebookPanel): Promise<void> {
     // has finished coming up, so the first execute absorbs the remaining
     // warm-up -- and attributing that to the install is how you end up
     // optimising the wrong thing.
+    const steps = stepsFor(panel);
     const firstExecMs = await run('pass', 'warmup');
-    const installMs = await run(INSTALL, 'install');
-    const initMs = await run(INITIALIZE, 'initialize');
+    const installMs = await run(steps.install, 'install');
+    const initMs = await run(steps.initialize, 'initialize');
 
     announce('PLR_BOOTSTRAP_READY', {
       kernelId: kernel.id,
